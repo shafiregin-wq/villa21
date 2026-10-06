@@ -52,10 +52,9 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
 .cap{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;padding:0 4px 8px}
 
 /* Brand */
-.badge{display:inline-grid;place-items:center;background:var(--primary);color:var(--primary-ink);font:800 1rem/1 var(--round);letter-spacing:-.03em;border-radius:9px;width:36px;height:36px;position:relative}
-.badge::after{content:"";position:absolute;width:5px;height:5px;border-radius:50%;background:var(--dot);right:5px;bottom:9px}
-.badge.lg{width:76px;height:76px;border-radius:20px;font-size:2.1rem}
-.badge.lg::after{width:9px;height:9px;right:10px;bottom:20px}
+.badge{display:inline-block;width:38px;height:38px;border-radius:50%;flex:none;vertical-align:middle}
+.badge.lg{width:120px;height:120px}
+.badge.sm{width:28px;height:28px;margin-right:10px}
 
 /* Header */
 .top{position:sticky;top:0;z-index:20;background:var(--bg);margin-inline:calc(-1 * max(16px,env(safe-area-inset-left,0px)));padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px}
@@ -200,7 +199,7 @@ button.cell:active{background:var(--fill)}
 <body>
 <header class="top" id="top" hidden>
   <div class="top-in">
-    <div class="brand"><span class="badge">21</span><b>Villa 21</b></div>
+    <div class="brand"><img class="badge" src="logo.png" alt="Villa 21 logo"><b>Villa 21</b></div>
     <div class="sync" id="sync"><i></i><span>Synced</span></div>
   </div>
 </header>
@@ -393,7 +392,7 @@ const isExpense = e => e.type !== "payment";
 /* ============ Screens ============ */
 function viewOnbJoin(msg = "") {
   return `<div class="onb">
-    <div class="onb-head"><span class="badge lg">21</span><h1>Villa 21</h1><p class="muted">Paste the Villa 21 code your flatmate sent you on WhatsApp.</p></div>
+    <div class="onb-head"><img class="badge lg" src="logo.png" alt="Villa 21 logo"><h1>Villa 21</h1><p class="muted">Paste the Villa 21 code your flatmate sent you on WhatsApp.</p></div>
     <form class="field" id="joinForm" novalidate>
       <input class="inp code-inp" id="codeInp" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" aria-label="Villa 21 code">
       ${navigator.clipboard && navigator.clipboard.readText ? `<button class="btn" type="button" data-act="paste">Paste code</button>` : ""}
@@ -405,13 +404,13 @@ function viewOnbJoin(msg = "") {
 }
 function viewOnbWho() {
   return `<div class="onb">
-    <div class="onb-head"><span class="badge lg">21</span><h1>Who are you?</h1><p class="muted">This phone will remember you.</p></div>
+    <div class="onb-head"><img class="badge lg" src="logo.png" alt="Villa 21 logo"><h1>Who are you?</h1><p class="muted">This phone will remember you.</p></div>
     <div class="group">${USERS.map(u => `<button class="cell" data-act="pick-user" data-id="${u.id}"><span class="cell-main"><span class="cell-title">${esc(u.name)}</span></span>${CHEV}</button>`).join("")}</div>
   </div>`;
 }
 function viewSetup() {
   return `<div class="onb">
-    <div class="onb-head"><span class="badge lg">21</span><h1>Almost ready</h1><p class="muted">Villa 21 isn't connected to its database yet. Paste the Firebase settings into config.js and upload it again.</p></div>
+    <div class="onb-head"><img class="badge lg" src="logo.png" alt="Villa 21 logo"><h1>Almost ready</h1><p class="muted">Villa 21 isn't connected to its database yet. Paste the Firebase settings into config.js and upload it again.</p></div>
     <button class="btn" data-act="demo">Look around with sample data</button>
   </div>`;
 }
@@ -490,7 +489,7 @@ function viewSettings() {
     <section><div class="cap">Appearance</div><div class="seg"><button data-act="theme" data-v="light" aria-pressed="${theme === "light"}">Light</button><button data-act="theme" data-v="dark" aria-pressed="${theme === "dark"}">Dark</button><button data-act="theme" data-v="system" aria-pressed="${theme === "system"}">System</button></div></section>
     <section><div class="cap">Users</div><div class="group">${USERS.map(u => `<div class="kv"><span>${esc(u.name)}</span>${u.id === S.me ? `<span class="muted small">This phone</span>` : ""}</div>`).join("")}</div></section>
     ${S.demo ? "" : `<section><div class="cap">Invite</div><div class="group"><button class="cell" data-act="share-code"><span class="cell-main"><span class="cell-title">Send the Villa 21 code</span><span class="cell-sub">For TM and Rafi to join on their iPhones</span></span>${CHEV}</button></div></section>`}
-    <section><div class="cap">About</div><div class="group"><div class="kv"><span><span class="badge" style="width:28px;height:28px;font-size:.8rem;border-radius:7px;margin-right:10px;vertical-align:middle">21</span>Villa 21</span><span class="muted">Version ${VERSION}</span></div></div></section>`;
+    <section><div class="cap">About</div><div class="group"><div class="kv"><span><img class="badge sm" src="logo.png" alt="">Villa 21</span><span class="muted">Version ${VERSION}</span></div></div></section>`;
 }
 
 const VIEWS = { home: viewHome, expenses: viewExpenses, settings: viewSettings };
@@ -720,7 +719,7 @@ async function boot() {
   try { cfg = (await import("./config.js")).firebaseConfig; } catch (e) {}
   if (!cfg || !cfg.apiKey || /PASTE/.test(cfg.apiKey + cfg.projectId)) { S.phase = "setup"; render(); return; }
   try { await startFirebase(cfg); }
-  catch (e) { $("#main").innerHTML = `<div class="onb"><div class="onb-head"><span class="badge lg">21</span><p class="muted">Villa 21 couldn't load. Check your internet connection and open it again.</p></div></div>`; return; }
+  catch (e) { $("#main").innerHTML = `<div class="onb"><div class="onb-head"><img class="badge lg" src="logo.png" alt="Villa 21 logo"><p class="muted">Villa 21 couldn't load. Check your internet connection and open it again.</p></div></div>`; return; }
   if (!S.code) { S.phase = "join"; render(); return; }
   Store.listen().catch(() => {});
   S.phase = S.me ? "app" : "who"; render();

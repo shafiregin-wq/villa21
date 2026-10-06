@@ -1,7 +1,7 @@
 // Villa 21 service worker: keeps the app itself available offline.
 // Expense data is synced by Firebase, which has its own offline storage; its network calls are never cached here.
-const VERSION = "villa21-v1";
-const SHELL = ["./", "./index.html", "./config.js", "./manifest.webmanifest", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
+const VERSION = "villa21-v2";
+const SHELL = ["./", "./index.html", "./config.js", "./manifest.webmanifest", "./logo.png", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 const LIVE = /(firestore|identitytoolkit|securetoken|firebaseinstallations|firebaselogging)\.googleapis\.com$/;
 
 self.addEventListener("install", event => {
