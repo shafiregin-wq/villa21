@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Villa 21</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Villa 21">
+<meta name="format-detection" content="telephone=no">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<script>try{var t=localStorage.getItem("v21.theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<style>
+/* Layout: iPhone app shell. Grouped iOS-style cards on a system background, 3 bottom tabs, floating Add Expense button, slide-up sheets. */
+:root{
+  --bg:#F2F2F7; --card:#FFFFFF; --fill:#E9E9EE; --ink:#111113; --muted:#6C6C72; --sep:rgba(60,60,67,.18);
+  --primary:#111113; --primary-ink:#FFFFFF; --pos:#1E8E4A; --neg:#D7372F; --fun:#FFE9A8; --fun-ink:#5A3E00; --dot:#34C759;
+  --scrim:rgba(0,0,0,.35);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,system-ui,sans-serif;
+  --round:ui-rounded,"SF Pro Rounded",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#000000; --card:#1C1C1E; --fill:#2C2C2E; --ink:#F5F5F7; --muted:#9A9AA1; --sep:rgba(84,84,88,.6);
+  --primary:#F5F5F7; --primary-ink:#000000; --pos:#3DD07A; --neg:#FF6B61; --fun:#4A3A0B; --fun-ink:#FFE08A; --dot:#30D158;
+  --scrim:rgba(0,0,0,.55); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#000000; --card:#1C1C1E; --fill:#2C2C2E; --ink:#F5F5F7; --muted:#9A9AA1; --sep:rgba(84,84,88,.6);
+  --primary:#F5F5F7; --primary-ink:#000000; --pos:#3DD07A; --neg:#FF6B61; --fun:#4A3A0B; --fun-ink:#FFE08A; --dot:#30D158;
+  --scrim:rgba(0,0,0,.55); color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%;background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.35 var(--font);padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px));padding-block:0 calc(170px + env(safe-area-inset-bottom,0px));-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+input,textarea{-webkit-user-select:text;user-select:text}
+body.locked{overflow:hidden}
+h1,h2,h3{margin:0;font-weight:700;letter-spacing:-.02em}
+h1{font-size:2rem} h2{font-size:1.25rem} h3{font-size:1.05rem}
+p{margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;-webkit-tap-highlight-color:transparent}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.money{font-variant-numeric:tabular-nums;white-space:nowrap}
+.muted{color:var(--muted)} .pos{color:var(--pos)} .neg{color:var(--neg)}
+.small{font-size:.88rem}
+.cap{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;padding:0 4px 8px}
+
+/* Brand */
+.badge{display:inline-grid;place-items:center;background:var(--primary);color:var(--primary-ink);font:800 1rem/1 var(--round);letter-spacing:-.03em;border-radius:9px;width:36px;height:36px;position:relative}
+.badge::after{content:"";position:absolute;width:5px;height:5px;border-radius:50%;background:var(--dot);right:5px;bottom:9px}
+.badge.lg{width:76px;height:76px;border-radius:20px;font-size:2.1rem}
+.badge.lg::after{width:9px;height:9px;right:10px;bottom:20px}
+
+/* Header */
+.top{position:sticky;top:0;z-index:20;background:var(--bg);margin-inline:calc(-1 * max(16px,env(safe-area-inset-left,0px)));padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px}
+.top-in{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand b{font-size:1.15rem;letter-spacing:-.02em}
+.sync{font-size:.78rem;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap}
+.sync i{width:7px;height:7px;border-radius:50%;background:var(--dot)}
+.sync.wait i{background:#FF9F0A}
+main{display:flex;flex-direction:column;gap:22px;padding-top:8px}
+
+/* Cards & lists */
+.card{background:var(--card);border-radius:16px;padding:16px}
+.group{background:var(--card);border-radius:16px;overflow:hidden}
+.cell{display:flex;align-items:center;gap:12px;min-height:56px;padding:10px 16px;position:relative;width:100%;background:none;border:0;text-align:left;color:inherit}
+.group .cell + .cell::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--sep)}
+.cell.emoji-cell + .cell.emoji-cell::before{left:64px}
+button.cell:active{background:var(--fill)}
+.cell-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.cell-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cell-sub{font-size:.85rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cell-end{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.emo{width:38px;height:38px;border-radius:11px;background:var(--fill);display:grid;place-items:center;font-size:1.25rem;flex:none}
+.chev{color:var(--muted);flex:none}
+.sec-head{display:flex;justify-content:space-between;align-items:baseline;padding:0 4px 8px}
+.sec-head h2{font-size:1.2rem}
+.link{border:0;background:none;color:var(--ink);font-weight:600;padding:6px 0;text-decoration:underline;text-underline-offset:3px;font-size:.95rem}
+
+/* Home */
+.month-card{display:flex;flex-direction:column;gap:2px}
+.month-card .total{font:700 2.4rem/1.1 var(--round);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.bal{display:flex;flex-direction:column;gap:6px}
+.bal .amt{font:700 1.7rem/1.15 var(--round);letter-spacing:-.02em}
+.owe{display:flex;flex-direction:column;gap:8px;padding:12px 16px;position:relative}
+.group .owe + .owe::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--sep)}
+.owe-row{display:flex;align-items:center;gap:10px;min-height:36px}
+.owe-names{flex:1;min-width:0;font-weight:600}
+.owe-names span{color:var(--muted);font-weight:500;margin:0 4px}
+.owe-amt{font-weight:700;font-variant-numeric:tabular-nums}
+.paid-btn{border:0;background:var(--fill);color:var(--ink);font-weight:600;font-size:.85rem;border-radius:999px;padding:8px 12px;min-height:36px}
+.fun{align-self:flex-start;background:var(--fun);color:var(--fun-ink);font-weight:700;font-size:.85rem;border-radius:999px;padding:5px 11px;transform-origin:left center}
+.fun.anim{animation:pop .45s cubic-bezier(.2,1.4,.4,1)}
+@keyframes pop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
+.square{display:flex;align-items:center;gap:10px;padding:16px;color:var(--muted)}
+
+/* Floating add button */
+.add-fab{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(66px + env(safe-area-inset-bottom,0px));z-index:31;width:min(calc(100% - 32px),420px);border:0;border-radius:16px;background:var(--primary);color:var(--primary-ink);font-weight:700;font-size:1.1rem;min-height:56px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+.add-fab:active{transform:translateX(-50%) scale(.98)}
+
+/* Tabs */
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:30;background:color-mix(in srgb,var(--bg) 88%,transparent);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-top:.5px solid var(--sep);padding-bottom:env(safe-area-inset-bottom,0px)}
+.tabs-in{display:grid;grid-template-columns:repeat(3,1fr);max-width:500px;margin:0 auto}
+.tab{border:0;background:none;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px 6px;font-size:.7rem;font-weight:600;color:var(--muted);min-height:52px}
+.tab[aria-current="page"]{color:var(--ink)}
+.tab svg{width:26px;height:26px}
+
+/* Segmented control */
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--fill);border-radius:10px;padding:3px;gap:3px}
+.seg button{border:0;background:none;border-radius:8px;min-height:36px;font-weight:600;font-size:.92rem;color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--card);box-shadow:0 1px 4px rgba(0,0,0,.14)}
+:root[data-theme="dark"] .seg button[aria-pressed="true"]{background:#636366}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .seg button[aria-pressed="true"]{background:#636366}}
+
+/* Month switcher */
+.monthbar{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.monthbar b{font-size:1.15rem}
+.round-btn{width:44px;height:44px;border-radius:50%;border:0;background:var(--card);display:grid;place-items:center;color:var(--ink)}
+.day{font-size:.82rem;font-weight:600;color:var(--muted);padding:14px 4px 8px;text-transform:uppercase;letter-spacing:.04em}
+.empty{text-align:center;color:var(--muted);padding:32px 16px;display:flex;flex-direction:column;gap:6px;align-items:center}
+.empty .big-emo{font-size:2.4rem}
+.kv{display:flex;justify-content:space-between;gap:12px;min-height:46px;align-items:center;padding:8px 16px;position:relative}
+.group .kv + .kv::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--sep)}
+.kv b{font-variant-numeric:tabular-nums}
+.bar{height:6px;background:var(--fill);border-radius:3px;overflow:hidden;margin:-4px 16px 10px}
+.bar i{display:block;height:100%;background:var(--ink);border-radius:3px}
+
+/* Forms */
+.field{display:flex;flex-direction:column;gap:8px}
+.lbl{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;padding:0 4px;display:flex;justify-content:space-between;align-items:baseline}
+.lbl em{font-style:normal;text-transform:none;letter-spacing:0;font-weight:500}
+.inp{width:100%;border:0;background:var(--card);border-radius:12px;padding:14px 16px;font-size:17px;color:var(--ink);min-height:50px}
+.inp::placeholder{color:var(--muted)}
+.amount{display:flex;align-items:baseline;gap:8px;background:var(--card);border-radius:16px;padding:12px 18px}
+.amount span{font:600 1.3rem var(--round);color:var(--muted)}
+.amount input{flex:1;min-width:0;border:0;background:none;font:700 2.6rem/1.2 var(--round);letter-spacing:-.03em;color:var(--ink);padding:0;outline:none;font-variant-numeric:tabular-nums}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 6px;margin:0 -16px;padding-inline:16px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:0;background:var(--card);border-radius:999px;min-height:42px;padding:8px 14px;font-weight:600;font-size:.95rem;color:var(--ink);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--primary);color:var(--primary-ink)}
+.chip.add{border:1.5px dashed var(--sep);background:none;color:var(--muted)}
+.who-row{display:flex;align-items:center;gap:12px;min-height:54px;padding:8px 16px;position:relative;width:100%;border:0;background:none;color:inherit;text-align:left}
+.group .who-row + .who-row::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--sep)}
+.tick{width:26px;height:26px;border-radius:50%;border:2px solid var(--sep);display:grid;place-items:center;flex:none;color:var(--primary-ink)}
+.tick.on{background:var(--primary);border-color:var(--primary)}
+.share{font-variant-numeric:tabular-nums;font-weight:600;min-width:90px;text-align:right}
+.share input{width:96px;border:0;background:var(--fill);border-radius:9px;padding:8px 10px;text-align:right;font-size:17px;color:var(--ink);font-variant-numeric:tabular-nums}
+.toggle{position:relative;width:51px;height:31px;flex:none}
+.toggle input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.toggle i{position:absolute;inset:0;background:var(--fill);border-radius:999px;transition:background .2s}
+.toggle i::after{content:"";position:absolute;width:27px;height:27px;top:2px;left:2px;background:#fff;border-radius:50%;box-shadow:0 2px 4px rgba(0,0,0,.25);transition:transform .2s}
+.toggle input:checked + i{background:var(--pos)}
+.toggle input:checked + i::after{transform:translateX(20px)}
+.split-msg{font-size:.88rem;font-weight:600;padding:0 4px}
+.err{color:var(--neg);font-weight:600;font-size:.92rem;padding:0 4px}
+.btn{border:0;border-radius:14px;min-height:52px;padding:12px 18px;font-weight:700;font-size:1.02rem;background:var(--card);color:var(--ink);width:100%}
+.btn.primary{background:var(--primary);color:var(--primary-ink)}
+.btn.danger{color:var(--neg)}
+.btn.solid-danger{background:var(--neg);color:#fff}
+.btn:disabled{opacity:.5}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* Sheets */
+.scrim{position:fixed;inset:0;background:var(--scrim);z-index:50;opacity:0;transition:opacity .25s}
+.scrim.open{opacity:1}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:51;background:var(--bg);border-radius:16px 16px 0 0;height:calc(100% - 12px - env(safe-area-inset-top,0px));display:flex;flex-direction:column;transform:translateY(100%);transition:transform .32s cubic-bezier(.2,.9,.25,1)}
+.sheet.open{transform:none}
+.sheet.short{height:auto;max-height:90%}
+.sheet-head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:14px 16px 10px;gap:8px}
+.sheet-head h2{font-size:1.05rem;text-align:center;white-space:nowrap}
+.sheet-head .l{justify-self:start} .sheet-head .r{justify-self:end}
+.text-btn{border:0;background:none;color:var(--ink);font-size:1.02rem;padding:8px 2px;min-height:44px}
+.text-btn.strong{font-weight:700}
+.sheet-body{flex:1;overflow:auto;padding:6px 16px calc(24px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:20px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.grabber{width:36px;height:5px;border-radius:3px;background:var(--sep);margin:6px auto 0}
+.detail-amt{font:700 2.6rem/1.1 var(--round);letter-spacing:-.03em;text-align:center;font-variant-numeric:tabular-nums}
+.detail-top{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding-top:6px}
+.detail-top .emo{width:60px;height:60px;border-radius:18px;font-size:2rem}
+
+/* Onboarding */
+.onb{min-height:calc(100vh - 60px);display:flex;flex-direction:column;justify-content:center;gap:24px;padding:24px 4px}
+.onb-head{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center}
+.code-inp{font:600 1.15rem/1.3 ui-monospace,Menlo,monospace;letter-spacing:.06em;text-transform:uppercase;text-align:center}
+
+/* Toast */
+#toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 10px);z-index:90;display:flex;flex-direction:column;gap:8px;width:min(92vw,420px);pointer-events:none}
+.toast{background:var(--primary);color:var(--primary-ink);border-radius:14px;padding:12px 16px;font-weight:600;font-size:.95rem;box-shadow:0 8px 24px rgba(0,0,0,.25);text-align:center;animation:drop .3s ease-out}
+.toast.bad{background:var(--neg);color:#fff}
+@keyframes drop{from{transform:translateY(-12px);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top" id="top" hidden>
+  <div class="top-in">
+    <div class="brand"><span class="badge">21</span><b>Villa 21</b></div>
+    <div class="sync" id="sync"><i></i><span>Synced</span></div>
+  </div>
+</header>
+<main id="main"></main>
+<button class="add-fab" id="fab" data-act="add" hidden>+ Add Expense</button>
+<nav class="tabs" id="tabs" hidden><div class="tabs-in">
+  <button class="tab" data-to="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>Home</button>
+  <button class="tab" data-to="expenses"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>Expenses</button>
+  <button class="tab" data-to="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Settings</button>
+</div></nav>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script type="module">
+/* ============ Fixed setup ============ */
+const VERSION = "1.0";
+const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
+const USERS = [
+  { id: "regin", name: "Regin Shafi", short: "Regin" },
+  { id: "tm", name: "TM", short: "TM" },
+  { id: "rafi", name: "Rafi", short: "Rafi" }
+];
+const USER = Object.fromEntries(USERS.map(u => [u.id, u]));
+const BASE_CATS = [
+  { id: "food", label: "Food", emoji: "🍔" }, { id: "rent", label: "Rent", emoji: "🏠" }, { id: "groceries", label: "Groceries", emoji: "🛒" },
+  { id: "electricity", label: "Electricity", emoji: "💡" }, { id: "water", label: "Water", emoji: "💧" }, { id: "internet", label: "Internet", emoji: "📶" },
+  { id: "cleaning", label: "Cleaning", emoji: "🧹" }, { id: "maintenance", label: "Maintenance", emoji: "🔧" }, { id: "transport", label: "Transport", emoji: "🚕" },
+  { id: "other", label: "Other", emoji: "📦" }
+];
+const UTILITIES = ["electricity", "water", "internet"];
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const LS = { user: "v21.user", code: "v21.code", theme: "v21.theme", cat: "v21.lastCat" };
+
+/* ============ Small helpers ============ */
+const $ = (s, r = document) => r.querySelector(s);
+const pad = n => String(n).padStart(2, "0");
+const isoOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const todayISO = () => isoOf(new Date());
+const monthOf = iso => String(iso || "").slice(0, 7);
+const parseISO = iso => { const [y, m, d] = String(iso).split("-").map(Number); return new Date(y, m - 1, d || 1); };
+const validISO = iso => /^\d{4}-\d{2}-\d{2}$/.test(iso || "") && isoOf(parseISO(iso)) === iso;
+const monthLabel = key => { const [y, m] = key.split("-").map(Number); return `${MONTHS[m - 1]} ${y}`; };
+const shiftMonth = (key, n) => { const [y, m] = key.split("-").map(Number); const d = new Date(y, m - 1 + n, 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
+const dayLabel = iso => { const d = parseISO(iso); return `${pad(d.getDate())} ${MONTHS[d.getMonth()]}`; };
+const nf = new Intl.NumberFormat("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const nf2 = new Intl.NumberFormat("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const aed = f => "AED " + ((f || 0) % 100 ? nf2 : nf).format((f || 0) / 100);   // amounts are kept in fils: 1 AED = 100 fils
+const toF = v => Math.round((+v || 0) * 100);
+const num = v => { if (v === "" || v == null) return null; const n = typeof v === "number" ? v : parseFloat(String(v).replace(/,/g, "")); return isFinite(n) ? n : NaN; };
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} };
+const nameOf = id => (USER[id] && USER[id].name) || "Someone";
+const shortOf = id => (USER[id] && USER[id].short) || "Someone";
+const CHEV = `<svg class="chev" width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 1l6 6-6 6"/></svg>`;
+const CHECK = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>`;
+
+/* ============ Split, balance and settle-up logic ============ */
+// Equal split in fils; leftover fils go to the first people so the shares always add up exactly.
+function equalSplit(totalF, ids) {
+  const out = {}; if (!ids.length) return out;
+  const base = Math.floor(totalF / ids.length); let rem = totalF - base * ids.length;
+  ids.forEach(id => { out[id] = base + (rem > 0 ? 1 : 0); if (rem > 0) rem--; });
+  return out;
+}
+// Net = total paid − total share, per person. Positive: should receive. Negative: owes.
+function balances(list) {
+  const net = Object.fromEntries(USERS.map(u => [u.id, 0]));
+  list.forEach(e => {
+    if (net[e.paidBy] !== undefined) net[e.paidBy] += e.amountF || 0;
+    Object.entries(e.split || {}).forEach(([id, f]) => { if (net[id] !== undefined) net[id] -= f; });
+  });
+  return net;
+}
+// Fewest transfers: biggest debtor pays biggest creditor until everyone is square.
+function settleUp(net) {
+  const cred = Object.entries(net).filter(([, v]) => v > 0).map(([id, v]) => ({ id, v })).sort((a, b) => b.v - a.v);
+  const debt = Object.entries(net).filter(([, v]) => v < 0).map(([id, v]) => ({ id, v: -v })).sort((a, b) => b.v - a.v);
+  const out = []; let i = 0, j = 0;
+  while (i < debt.length && j < cred.length) {
+    const amt = Math.min(debt[i].v, cred[j].v);
+    if (amt > 0) out.push({ from: debt[i].id, to: cred[j].id, amountF: amt });
+    debt[i].v -= amt; cred[j].v -= amt;
+    if (!debt[i].v) i++; if (!cred[j].v) j++;
+  }
+  return out;
+}
+// Fun line above a debt: over AED 50 and over AED 100.
+const funMsg = f => f > 10000 ? "💀 Aykk myre" : f > 5000 ? "😂 Aychirra paisaa" : "";
+window.Villa21Logic = { equalSplit, balances, settleUp, funMsg };
+
+/* ============ State ============ */
+const S = {
+  phase: "loading", me: lsGet(LS.user), code: lsGet(LS.code), demo: false,
+  expenses: [], customCats: [], pending: false, online: navigator.onLine, loaded: false,
+  view: "home", month: monthOf(todayISO()), expTab: "list"
+};
+let Store = null;
+const shownFun = new Set();
+const cats = () => [...BASE_CATS, ...S.customCats];
+const catOf = id => cats().find(c => c.id === id) || { id, label: id || "Other", emoji: "📦" };
+
+/* ============ Cloud store (Firebase) ============ */
+const villaKey = code => "v21-" + code;
+async function startFirebase(cfg) {
+  const [appM, authM, fsM] = await Promise.all([import(FB + "firebase-app.js"), import(FB + "firebase-auth.js"), import(FB + "firebase-firestore.js")]);
+  const F = { ...appM, ...authM, ...fsM };
+  const app = F.initializeApp(cfg);
+  let db; try { db = F.initializeFirestore(app, { localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() }) }); } catch (e) { db = F.getFirestore(app); }
+  const auth = F.getAuth(app);
+  const ready = new Promise(res => { const off = F.onAuthStateChanged(auth, u => { if (u) { off(); res(u); } }); });
+  if (!auth.currentUser) F.signInAnonymously(auth).catch(() => {});
+  let unsubs = [];
+  const col = name => F.collection(db, "villas", villaKey(S.code), name);
+  Store = {
+    ts: () => F.serverTimestamp(),
+    async check(code) {
+      await ready;
+      const snap = await F.getDocFromServer(F.doc(db, "villas", villaKey(code), "meta", "villa"));
+      return snap.exists();
+    },
+    async create(code) {
+      await ready;
+      await F.setDoc(F.doc(db, "villas", villaKey(code), "meta", "villa"), { name: "Villa 21", users: USERS.map(({ id, name }) => ({ id, name })), createdAt: F.serverTimestamp() });
+    },
+    async listen() {
+      await ready;
+      unsubs.forEach(u => u()); unsubs = [];
+      unsubs.push(F.onSnapshot(col("expenses"), { includeMetadataChanges: true }, snap => {
+        S.expenses = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+        S.pending = snap.metadata.hasPendingWrites; S.loaded = true;
+        render();
+      }, err => { S.loaded = true; if (err && err.code === "permission-denied") toast("This phone can't open the Villa 21 data. Check the code in Settings.", "bad", 6000); render(); }));
+      unsubs.push(F.onSnapshot(F.doc(db, "villas", villaKey(S.code), "meta", "categories"), snap => {
+        S.customCats = (snap.exists() && Array.isArray(snap.data().list)) ? snap.data().list : []; render();
+      }, () => {}));
+    },
+    save(id, obj) { return F.setDoc(F.doc(col("expenses"), id), obj); },
+    remove(id) { return F.deleteDoc(F.doc(col("expenses"), id)); },
+    saveCats(list) { return F.setDoc(F.doc(db, "villas", villaKey(S.code), "meta", "categories"), { list }); }
+  };
+}
+function startDemo() {
+  S.demo = true; S.code = "DEMO"; if (!S.me) S.me = "regin";
+  const m = S.month, all = USERS.map(u => u.id);
+  const mk = (description, amt, category, paidBy, day, ids = all) => { const f = toF(amt); return { id: newId(), description, amountF: f, amount: f / 100, category, paidBy, date: `${m}-${pad(day)}`, participants: ids, split: equalSplit(f, ids), splitMode: "equal", type: "expense", createdBy: paidBy, createdMs: day }; };
+  S.expenses = [mk("Monthly rent", 3000, "rent", "tm", 1), mk("DEWA bill", 350, "electricity", "rafi", 3), mk("Chicken & rice", 120, "food", "regin", 6), mk("Carrefour run", 210, "groceries", "regin", 5), mk("Cleaner", 100, "cleaning", "tm", 4, ["tm", "rafi"])];
+  S.loaded = true;
+  Store = {
+    ts: () => Date.now(),
+    save(id, obj) { const i = S.expenses.findIndex(x => x.id === id); const o = { ...obj, id }; if (i >= 0) S.expenses[i] = o; else S.expenses.push(o); render(); return Promise.resolve(); },
+    remove(id) { S.expenses = S.expenses.filter(x => x.id !== id); render(); return Promise.resolve(); },
+    saveCats(list) { S.customCats = list; render(); return Promise.resolve(); }
+  };
+  S.phase = S.me ? "app" : "who"; render();
+}
+
+/* ============ UI basics ============ */
+function toast(msg, tone, ms = 2600) { const el = document.createElement("div"); el.className = "toast" + (tone === "bad" ? " bad" : ""); el.textContent = msg; $("#toast").appendChild(el); setTimeout(() => el.remove(), ms); }
+const SHEETS = [];
+function openSheet({ title, left = "Cancel", right = "", short = false }) {
+  const scrim = document.createElement("div"); scrim.className = "scrim";
+  const sh = document.createElement("div"); sh.className = "sheet" + (short ? " short" : ""); sh.setAttribute("role", "dialog"); sh.setAttribute("aria-modal", "true"); sh.setAttribute("aria-label", title);
+  sh.innerHTML = `<div class="grabber"></div><div class="sheet-head"><button class="text-btn l" data-sx="left">${esc(left)}</button><h2>${esc(title)}</h2><span class="r">${right ? `<button class="text-btn strong" data-sx="right">${esc(right)}</button>` : ""}</span></div><div class="sheet-body"></div>`;
+  document.body.append(scrim, sh); document.body.classList.add("locked");
+  void sh.offsetHeight; // apply the closed position first so the slide-up animates
+  scrim.classList.add("open"); sh.classList.add("open");
+  const api = {
+    el: sh, body: $(".sheet-body", sh), onRight: null, refresh: null,
+    close() { scrim.classList.remove("open"); sh.classList.remove("open"); const i = SHEETS.indexOf(api); if (i >= 0) SHEETS.splice(i, 1); if (!SHEETS.length) document.body.classList.remove("locked"); setTimeout(() => { scrim.remove(); sh.remove(); }, 320); }
+  };
+  scrim.onclick = () => api.close();
+  $("[data-sx=left]", sh).onclick = () => api.close();
+  const r = $("[data-sx=right]", sh); if (r) r.onclick = () => api.onRight && api.onRight();
+  SHEETS.push(api); return api;
+}
+function confirmSheet(title, text, okLabel, danger, onOk) {
+  const sh = openSheet({ title, short: true });
+  sh.body.innerHTML = `${text ? `<p class="muted" style="text-align:center">${text}</p>` : ""}<div class="row2"><button class="btn" data-x="cancel">Cancel</button><button class="btn ${danger ? "solid-danger" : "primary"}" data-x="ok">${esc(okLabel)}</button></div>`;
+  $("[data-x=cancel]", sh.body).onclick = () => sh.close();
+  $("[data-x=ok]", sh.body).onclick = () => { sh.close(); onOk(); };
+}
+function funTag(key, f) {
+  const msg = funMsg(f); if (!msg) return "";
+  const k = key + ":" + msg, anim = !shownFun.has(k); shownFun.add(k);
+  return `<span class="fun${anim ? " anim" : ""}">${msg}</span>`;
+}
+const isExpense = e => e.type !== "payment";
+
+/* ============ Screens ============ */
+function viewOnbJoin(msg = "") {
+  return `<div class="onb">
+    <div class="onb-head"><span class="badge lg">21</span><h1>Villa 21</h1><p class="muted">Paste the Villa 21 code your flatmate sent you on WhatsApp.</p></div>
+    <form class="field" id="joinForm" novalidate>
+      <input class="inp code-inp" id="codeInp" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" aria-label="Villa 21 code">
+      ${navigator.clipboard && navigator.clipboard.readText ? `<button class="btn" type="button" data-act="paste">Paste code</button>` : ""}
+      <p class="err" id="joinErr">${esc(msg)}</p>
+      <button class="btn primary" type="submit">Join Villa 21</button>
+    </form>
+    <p class="muted small" style="text-align:center">Setting up Villa 21 for the first time? <button class="link small" data-act="create">Create the villa</button></p>
+  </div>`;
+}
+function viewOnbWho() {
+  return `<div class="onb">
+    <div class="onb-head"><span class="badge lg">21</span><h1>Who are you?</h1><p class="muted">This phone will remember you.</p></div>
+    <div class="group">${USERS.map(u => `<button class="cell" data-act="pick-user" data-id="${u.id}"><span class="cell-main"><span class="cell-title">${esc(u.name)}</span></span>${CHEV}</button>`).join("")}</div>
+  </div>`;
+}
+function viewSetup() {
+  return `<div class="onb">
+    <div class="onb-head"><span class="badge lg">21</span><h1>Almost ready</h1><p class="muted">Villa 21 isn't connected to its database yet. Paste the Firebase settings into config.js and upload it again.</p></div>
+    <button class="btn" data-act="demo">Look around with sample data</button>
+  </div>`;
+}
+
+function expenseCell(e) {
+  if (!isExpense(e)) {
+    const to = Object.keys(e.split || {})[0];
+    return `<button class="cell emoji-cell" data-act="detail" data-id="${esc(e.id)}"><span class="emo">💸</span><span class="cell-main"><span class="cell-title">${esc(shortOf(e.paidBy))} paid ${esc(shortOf(to))}</span><span class="cell-sub">Payment · ${dayLabel(e.date)}</span></span><span class="cell-end"><b class="money">${aed(e.amountF)}</b></span></button>`;
+  }
+  const c = catOf(e.category), n = (e.participants || Object.keys(e.split || {})).length;
+  const who = n === USERS.length ? "Split between all 3" : `Split: ${(e.participants || []).map(shortOf).join(" & ")}`;
+  return `<button class="cell emoji-cell" data-act="detail" data-id="${esc(e.id)}"><span class="emo">${esc(c.emoji)}</span><span class="cell-main"><span class="cell-title">${esc(e.description || c.label)}</span><span class="cell-sub">Paid by ${esc(nameOf(e.paidBy))} · ${esc(who)}</span></span><span class="cell-end"><b class="money">${aed(e.amountF)}</b></span></button>`;
+}
+
+function viewHome() {
+  const month = monthOf(todayISO());
+  const monthTotal = S.expenses.filter(e => isExpense(e) && monthOf(e.date) === month).reduce((s, e) => s + (e.amountF || 0), 0);
+  const net = balances(S.expenses), mine = net[S.me] || 0, plan = settleUp(net);
+  const recent = S.expenses.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdMs || 0) - (a.createdMs || 0)).slice(0, 5);
+  const balHtml = mine < 0
+    ? `${funTag("me", -mine)}<span class="muted small">Your balance</span><span class="amt neg">You owe ${aed(-mine)}</span>`
+    : mine > 0 ? `<span class="muted small">Your balance</span><span class="amt pos">You should receive ${aed(mine)}</span>`
+    : `<span class="muted small">Your balance</span><span class="amt">You're all square ✓</span>`;
+  return `
+    <section class="card month-card" data-act="go-month" role="button" tabindex="0">
+      <span class="muted small">${monthLabel(month)} · Total expenses</span>
+      <span class="total">${aed(monthTotal)}</span>
+    </section>
+    <section class="card bal">${balHtml}</section>
+    <section>
+      <div class="sec-head"><h2>Who owes who?</h2></div>
+      <div class="group">${plan.length ? plan.map(p => `<div class="owe">${funTag(p.from + ">" + p.to, p.amountF)}<div class="owe-row"><span class="owe-names">${esc(nameOf(p.from))}<span>→</span>${esc(nameOf(p.to))}</span><span class="owe-amt">${aed(p.amountF)}</span><button class="paid-btn" data-act="mark-paid" data-from="${p.from}" data-to="${p.to}" data-f="${p.amountF}">Paid</button></div></div>`).join("") : `<div class="square">✓ Everyone is square. Nobody owes anything.</div>`}</div>
+    </section>
+    <section>
+      <div class="sec-head"><h2>Recent expenses</h2>${S.expenses.length > 5 ? `<button class="link" data-act="go-month">See all</button>` : ""}</div>
+      ${recent.length ? `<div class="group">${recent.map(expenseCell).join("")}</div>` : `<div class="card empty"><span class="big-emo">🧾</span><b>No expenses yet</b><span>Tap Add Expense to log the first one.</span></div>`}
+    </section>`;
+}
+
+function viewExpenses() {
+  const list = S.expenses.filter(e => monthOf(e.date) === S.month).sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdMs || 0) - (a.createdMs || 0));
+  const exp = list.filter(isExpense), total = exp.reduce((s, e) => s + (e.amountF || 0), 0);
+  let body = "";
+  if (S.expTab === "list") {
+    if (!list.length) body = `<div class="card empty"><span class="big-emo">🗓️</span><b>Nothing in ${monthLabel(S.month)}</b><span>Expenses you add for this month appear here.</span></div>`;
+    else { let last = ""; list.forEach(e => { if (e.date !== last) { body += `${last ? "</div>" : ""}<div class="day">${dayLabel(e.date)}</div><div class="group">`; last = e.date; } body += expenseCell(e); }); body += "</div>"; }
+  } else body = summaryHtml(exp, total);
+  return `
+    <div class="monthbar"><button class="round-btn" data-act="month" data-d="-1" aria-label="Previous month"><svg width="10" height="16" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 1 1 7l6 6"/></svg></button>
+      <div style="text-align:center"><b>${monthLabel(S.month)}</b><div class="muted small">Total ${aed(total)}</div></div>
+      <button class="round-btn" data-act="month" data-d="1" aria-label="Next month"><svg width="10" height="16" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 1l6 6-6 6"/></svg></button></div>
+    <div class="seg" role="group" aria-label="View"><button data-act="exp-tab" data-v="list" aria-pressed="${S.expTab === "list"}">Expenses</button><button data-act="exp-tab" data-v="summary" aria-pressed="${S.expTab === "summary"}">Summary</button></div>
+    <div>${body}</div>`;
+}
+function summaryHtml(exp, total) {
+  const byCat = {};
+  exp.forEach(e => { const key = UTILITIES.includes(e.category) ? "__util" : e.category || "other"; byCat[key] = (byCat[key] || 0) + (e.amountF || 0); });
+  const catRows = Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, v]) => { const c = k === "__util" ? { emoji: "💡", label: "Utilities" } : catOf(k); return { label: `${c.emoji} ${c.label}`, v }; });
+  const paid = Object.fromEntries(USERS.map(u => [u.id, 0])); exp.forEach(e => { if (paid[e.paidBy] !== undefined) paid[e.paidBy] += e.amountF || 0; });
+  const net = balances(S.expenses);
+  const max = Math.max(1, ...catRows.map(r => r.v));
+  return `<div style="display:flex;flex-direction:column;gap:22px;padding-top:16px">
+    <section class="card month-card"><span class="muted small">Total expenses · ${monthLabel(S.month)}</span><span class="total">${aed(total)}</span></section>
+    <section><div class="cap">By category</div><div class="group">${catRows.length ? catRows.map(r => `<div class="kv"><span>${esc(r.label)}</span><b>${aed(r.v)}</b></div><div class="bar"><i style="width:${(r.v / max * 100).toFixed(1)}%"></i></div>`).join("") : `<div class="kv muted">No expenses this month</div>`}</div></section>
+    <section><div class="cap">Paid by</div><div class="group">${USERS.map(u => `<div class="kv"><span>${esc(u.name)}</span><b>${aed(paid[u.id])}</b></div>`).join("")}</div></section>
+    <section><div class="cap">Current balances</div><div class="group">${USERS.map(u => { const v = net[u.id] || 0; return `<div class="kv"><span>${esc(u.name)}</span><b class="${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${v > 0 ? "+" : v < 0 ? "−" : ""}${aed(Math.abs(v))}</b></div>`; }).join("")}</div>
+      <p class="muted small" style="padding:8px 4px 0">Balances include every month and every payment.</p></section>
+  </div>`;
+}
+
+function viewSettings() {
+  const theme = lsGet(LS.theme) || "system";
+  return `
+    <h1 style="padding:6px 4px 0">Settings</h1>
+    <section><div class="cap">Current user</div><div class="group">${USERS.map(u => `<button class="cell" data-act="set-user" data-id="${u.id}"><span class="cell-main"><span class="cell-title">${esc(u.name)}</span></span>${u.id === S.me ? `<span class="pos">${CHECK}</span>` : ""}</button>`).join("")}</div></section>
+    <section><div class="cap">Appearance</div><div class="seg"><button data-act="theme" data-v="light" aria-pressed="${theme === "light"}">Light</button><button data-act="theme" data-v="dark" aria-pressed="${theme === "dark"}">Dark</button><button data-act="theme" data-v="system" aria-pressed="${theme === "system"}">System</button></div></section>
+    <section><div class="cap">Users</div><div class="group">${USERS.map(u => `<div class="kv"><span>${esc(u.name)}</span>${u.id === S.me ? `<span class="muted small">This phone</span>` : ""}</div>`).join("")}</div></section>
+    ${S.demo ? "" : `<section><div class="cap">Invite</div><div class="group"><button class="cell" data-act="share-code"><span class="cell-main"><span class="cell-title">Send the Villa 21 code</span><span class="cell-sub">For TM and Rafi to join on their iPhones</span></span>${CHEV}</button></div></section>`}
+    <section><div class="cap">About</div><div class="group"><div class="kv"><span><span class="badge" style="width:28px;height:28px;font-size:.8rem;border-radius:7px;margin-right:10px;vertical-align:middle">21</span>Villa 21</span><span class="muted">Version ${VERSION}</span></div></div></section>`;
+}
+
+const VIEWS = { home: viewHome, expenses: viewExpenses, settings: viewSettings };
+function render() {
+  const main = $("#main"), app = S.phase === "app";
+  $("#top").hidden = !app; $("#tabs").hidden = !app; $("#fab").hidden = !app || S.view === "settings";
+  if (S.phase === "loading") { main.innerHTML = ""; return; }
+  if (S.phase === "setup") { main.innerHTML = viewSetup(); return; }
+  if (S.phase === "join") { if (!$("#joinForm")) main.innerHTML = viewOnbJoin(); return; }
+  if (S.phase === "who") { main.innerHTML = viewOnbWho(); return; }
+  const sync = $("#sync");
+  const state = S.demo ? ["", "Sample data"] : !S.online ? ["wait", "Offline — waiting to sync"] : S.pending ? ["wait", "Syncing…"] : ["", "✓ Synced"];
+  sync.className = "sync " + state[0]; sync.lastChild.textContent = state[1];
+  if (!S.online && !S.pending) sync.lastChild.textContent = "Offline";
+  if (!S.online && S.pending) sync.lastChild.textContent = "Offline — waiting to sync";
+  document.querySelectorAll(".tab").forEach(t => { if (t.dataset.to === S.view) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current"); });
+  main.innerHTML = S.loaded || S.demo ? VIEWS[S.view]() : `<div class="card empty"><span>Loading Villa 21…</span></div>`;
+  SHEETS.slice().forEach(s => s.refresh && s.refresh());
+}
+function go(view) { S.view = view; render(); window.scrollTo(0, 0); }
+window.addEventListener("online", () => { S.online = true; render(); });
+window.addEventListener("offline", () => { S.online = false; render(); });
+
+/* ============ Add / edit expense ============ */
+function openForm(existing) {
+  const lastCat = lsGet(LS.cat);
+  const F = existing
+    ? { ...existing, amount: String((existing.amountF || 0) / 100), participants: (existing.participants || Object.keys(existing.split || {})).slice(), custom: existing.splitMode === "custom", inputs: Object.fromEntries(Object.entries(existing.split || {}).map(([k, v]) => [k, String(v / 100)])) }
+    : { id: newId(), amount: "", description: "", category: cats().some(c => c.id === lastCat) ? lastCat : "food", date: todayISO(), paidBy: S.me, participants: USERS.map(u => u.id), custom: false, inputs: {} };
+  const sh = openSheet({ title: existing ? "Edit Expense" : "Add Expense", right: "Save" });
+  let addingCat = false;
+  function draw() {
+    sh.body.innerHTML = `
+      <div class="amount"><span>AED</span><input id="f-amount" type="text" inputmode="decimal" placeholder="0" value="${esc(F.amount)}" aria-label="Amount in AED" autocomplete="off"></div>
+      <input class="inp" id="f-desc" placeholder="What was it for? e.g. Chicken" value="${esc(F.description)}" maxlength="60" autocomplete="off" aria-label="Description">
+      <div class="field"><span class="lbl">Category</span>
+        <div class="chips">${cats().map(c => `<button class="chip" data-cat="${esc(c.id)}" aria-pressed="${F.category === c.id}">${esc(c.emoji)} ${esc(c.label)}</button>`).join("")}<button class="chip add" data-x="new-cat">＋ Custom</button></div>
+        ${addingCat ? `<div class="row2" style="grid-template-columns:72px 1fr auto;display:grid;gap:8px"><input class="inp" id="nc-emoji" placeholder="🙂" maxlength="4" aria-label="Emoji" style="text-align:center"><input class="inp" id="nc-name" placeholder="Category name, e.g. Gas" maxlength="24" aria-label="New category name"><button class="btn primary" data-x="save-cat" style="width:auto">Add</button></div>` : ""}
+      </div>
+      <div class="field"><span class="lbl">Paid by</span><div class="seg">${USERS.map(u => `<button data-paid="${u.id}" aria-pressed="${F.paidBy === u.id}">${esc(u.short)}</button>`).join("")}</div></div>
+      <div class="field"><span class="lbl">Split between <em>${F.custom ? "custom amounts" : "equally"}</em></span>
+        <div class="group" id="f-split"></div>
+        <div class="group"><label class="who-row" style="cursor:pointer"><span class="cell-main"><span class="cell-title">Custom split</span><span class="cell-sub">Set each person's amount yourself</span></span><span class="toggle"><input type="checkbox" id="f-custom" ${F.custom ? "checked" : ""}><i></i></span></label></div>
+        <div class="split-msg" id="f-split-msg"></div>
+      </div>
+      <div class="field"><span class="lbl">Date</span><input class="inp" id="f-date" type="date" value="${esc(F.date)}" aria-label="Date"></div>
+      <p class="err" id="f-err"></p>
+      <button class="btn primary" data-x="save">${existing ? "Save changes" : "Save expense"}</button>`;
+    drawSplit();
+  }
+  function compute() {
+    const totalF = toF(num(F.amount) || 0), ids = USERS.map(u => u.id).filter(id => F.participants.includes(id));
+    if (!F.custom) return { totalF, split: equalSplit(totalF, ids), ok: totalF > 0 && ids.length > 0, ids };
+    const split = {}; let sum = 0, bad = false;
+    ids.forEach(id => { const v = num(F.inputs[id]); if (v == null || isNaN(v) || v < 0) { bad = bad || (F.inputs[id] !== "" && F.inputs[id] != null); return; } const f = toF(v); if (f > 0) split[id] = f; sum += f; });
+    return { totalF, split, sum, bad, ok: totalF > 0 && ids.length > 0 && !bad && sum === totalF, ids };
+  }
+  function drawSplit() {
+    const box = $("#f-split", sh.body), msg = $("#f-split-msg", sh.body); if (!box) return;
+    const r = compute();
+    box.innerHTML = USERS.map(u => { const on = F.participants.includes(u.id); return `<div class="who-row"><button class="tick ${on ? "on" : ""}" data-part="${u.id}" aria-pressed="${on}" aria-label="Include ${esc(u.name)}">${on ? CHECK : ""}</button><span class="cell-main" data-part="${u.id}"><span class="cell-title">${esc(u.name)}</span></span><span class="share">${!on ? `<span class="muted small">Not included</span>` : F.custom ? `<input type="text" inputmode="decimal" data-in="${u.id}" value="${esc(F.inputs[u.id] ?? "")}" placeholder="0" aria-label="${esc(u.name)}'s amount">` : r.totalF ? aed(r.split[u.id] || 0) : "—"}</span></div>`; }).join("");
+    updateMsg(r);
+  }
+  function updateMsg(r = compute()) {
+    const msg = $("#f-split-msg", sh.body); if (!msg) return;
+    if (!r.ids.length) { msg.innerHTML = `<span class="neg">Choose at least one person.</span>`; return; }
+    if (!F.custom) { msg.innerHTML = r.totalF ? `<span class="muted">${aed(r.split[r.ids[0]] || 0)} each${r.ids.length === 1 ? "" : ` · ${r.ids.length} people`}</span>` : ""; return; }
+    if (!r.totalF) { msg.innerHTML = `<span class="muted">Enter the total amount first.</span>`; return; }
+    const diff = r.totalF - (r.sum || 0);
+    msg.innerHTML = r.bad ? `<span class="neg">Amounts must be numbers.</span>` : diff === 0 ? `<span class="pos">✓ Adds up to ${aed(r.totalF)}</span>` : diff > 0 ? `<span class="neg">${aed(diff)} left to split</span>` : `<span class="neg">${aed(-diff)} too much</span>`;
+  }
+  sh.body.addEventListener("input", ev => {
+    const el = ev.target;
+    if (el.id === "f-amount") { F.amount = el.value.replace(/[^\d.,]/g, ""); if (F.amount !== el.value) el.value = F.amount; if (F.custom) updateMsg(); else drawSplitShares(); }
+    if (el.id === "f-desc") F.description = el.value;
+    if (el.id === "f-date") F.date = el.value;
+    if (el.dataset.in) { F.inputs[el.dataset.in] = el.value; updateMsg(); }
+  });
+  function drawSplitShares() { const r = compute(); sh.body.querySelectorAll("#f-split .who-row").forEach((row, i) => { const id = USERS[i].id, s = row.querySelector(".share"); if (F.participants.includes(id)) s.textContent = r.totalF ? aed(r.split[id] || 0) : "—"; }); updateMsg(r); }
+  sh.body.addEventListener("change", ev => {
+    if (ev.target.id === "f-custom") {
+      F.custom = ev.target.checked;
+      if (F.custom) { const r = compute(); F.inputs = {}; const eq = equalSplit(r.totalF, r.ids); r.ids.forEach(id => F.inputs[id] = r.totalF ? String((eq[id] || 0) / 100) : ""); }
+      $(".lbl em", sh.body.querySelectorAll(".field")[2]).textContent = F.custom ? "custom amounts" : "equally";
+      drawSplit();
+    }
+  });
+  sh.body.addEventListener("click", ev => {
+    const t = ev.target.closest("[data-cat],[data-paid],[data-part],[data-x]"); if (!t) return;
+    if (t.dataset.cat) { F.category = t.dataset.cat; sh.body.querySelectorAll("[data-cat]").forEach(b => b.setAttribute("aria-pressed", b === t)); return; }
+    if (t.dataset.paid) { F.paidBy = t.dataset.paid; sh.body.querySelectorAll("[data-paid]").forEach(b => b.setAttribute("aria-pressed", b === t)); return; }
+    if (t.dataset.part) { const id = t.dataset.part; F.participants = F.participants.includes(id) ? F.participants.filter(x => x !== id) : [...F.participants, id]; if (F.custom && F.inputs[id] == null) F.inputs[id] = ""; drawSplit(); return; }
+    const x = t.dataset.x;
+    if (x === "new-cat") { addingCat = !addingCat; draw(); const n = $("#nc-name", sh.body); if (n) n.focus(); }
+    if (x === "save-cat") {
+      const name = ($("#nc-name", sh.body).value || "").trim(), emoji = ($("#nc-emoji", sh.body).value || "").trim() || "🏷️";
+      if (!name) { toast("Type a name for the category.", "bad"); return; }
+      const existingCat = cats().find(c => c.label.toLowerCase() === name.toLowerCase());
+      if (existingCat) F.category = existingCat.id;
+      else { const c = { id: "c-" + newId(), label: name, emoji: [...emoji].slice(0, 2).join("") }; S.customCats = [...S.customCats, c]; Store.saveCats(S.customCats).catch(() => toast("Couldn't save the category.", "bad")); F.category = c.id; }
+      addingCat = false; draw();
+    }
+    if (x === "save") save();
+  });
+  sh.onRight = save;
+  function save() {
+    const err = $("#f-err", sh.body), amount = num(F.amount);
+    const fail = m => { err.textContent = m; err.scrollIntoView({ block: "center", behavior: "smooth" }); };
+    if (amount == null) return fail("Enter the amount.");
+    if (isNaN(amount) || amount <= 0) return fail("The amount must be more than 0.");
+    if (amount > 1000000) return fail("That amount looks too high.");
+    if (!validISO(F.date)) return fail("Choose a date.");
+    if (F.date > todayISO()) return fail("The date can't be in the future.");
+    const r = compute();
+    if (!r.ids.length) return fail("Choose who to split with.");
+    if (F.custom && r.bad) return fail("The split amounts must be numbers.");
+    if (F.custom && r.sum !== r.totalF) return fail(`The split must add up to ${aed(r.totalF)}. ${r.sum < r.totalF ? aed(r.totalF - r.sum) + " is left." : aed(r.sum - r.totalF) + " too much."}`);
+    const c = catOf(F.category);
+    const obj = {
+      type: "expense", amount: r.totalF / 100, amountF: r.totalF, description: String(F.description || "").trim() || c.label,
+      category: c.id, date: F.date, paidBy: F.paidBy, participants: r.ids, split: r.split, splitMode: F.custom ? "custom" : "equal",
+      createdBy: existing ? existing.createdBy || S.me : S.me, createdAt: existing ? existing.createdAt || Store.ts() : Store.ts(),
+      updatedBy: S.me, updatedAt: Store.ts(), createdMs: existing ? existing.createdMs || Date.now() : Date.now()
+    };
+    lsSet(LS.cat, c.id);
+    Store.save(F.id, obj).catch(e => toast(e && e.code === "permission-denied" ? "This phone isn't allowed to save. Check the Villa 21 code." : "Couldn't save. Try again.", "bad", 5000));
+    SHEETS.slice().forEach(s => s.close());
+    toast(S.online || S.demo ? (existing ? "Expense updated" : "Expense added") : "Saved on this phone. It syncs when you're back online.");
+  }
+  draw();
+  if (!existing) { const a = $("#f-amount", sh.body); a.focus({ preventScroll: true }); }
+}
+
+/* ============ Details ============ */
+function openDetail(id) {
+  const sh = openSheet({ title: "Details", left: "Close" });
+  function draw() {
+    const e = S.expenses.find(x => x.id === id);
+    if (!e) { sh.close(); return; }
+    const pay = !isExpense(e), c = catOf(e.category), to = Object.keys(e.split || {})[0];
+    sh.body.innerHTML = `
+      <div class="detail-top"><span class="emo">${pay ? "💸" : esc(c.emoji)}</span><span class="detail-amt">${aed(e.amountF)}</span><b>${pay ? `${esc(nameOf(e.paidBy))} paid ${esc(nameOf(to))}` : esc(e.description)}</b><span class="muted small">${pay ? "Payment" : esc(c.label)} · ${dayLabel(e.date)} ${e.date.slice(0, 4)}</span></div>
+      ${pay ? "" : `<section><div class="cap">Paid by</div><div class="group"><div class="kv"><span>${esc(nameOf(e.paidBy))}</span><b>${aed(e.amountF)}</b></div></div></section>
+      <section><div class="cap">Split ${e.splitMode === "custom" ? "(custom)" : "equally"}</div><div class="group">${USERS.map(u => `<div class="kv"><span>${esc(u.name)}</span>${(e.split || {})[u.id] ? `<b>${aed(e.split[u.id])}</b>` : `<span class="muted small">Not included</span>`}</div>`).join("")}</div></section>`}
+      <p class="muted small" style="text-align:center">Added by ${esc(nameOf(e.createdBy))}${e.updatedBy && e.updatedBy !== e.createdBy ? ` · edited by ${esc(nameOf(e.updatedBy))}` : ""}</p>
+      <div class="row2">${pay ? "" : `<button class="btn" data-x="edit">Edit</button>`}<button class="btn danger" data-x="delete" ${pay ? 'style="grid-column:1/-1"' : ""}>Delete</button></div>`;
+  }
+  sh.body.addEventListener("click", ev => {
+    const b = ev.target.closest("[data-x]"); if (!b) return;
+    const e = S.expenses.find(x => x.id === id); if (!e) return;
+    if (b.dataset.x === "edit") openForm(e);
+    if (b.dataset.x === "delete") confirmSheet(isExpense(e) ? "Delete this expense?" : "Delete this payment?", "Everyone's balance updates straight away.", "Delete", true, () => {
+      Store.remove(id).catch(() => toast("Couldn't delete. Try again.", "bad"));
+      sh.close(); toast(isExpense(e) ? "Expense deleted" : "Payment deleted");
+    });
+  });
+  sh.refresh = draw; draw();
+}
+
+/* ============ Mark as paid ============ */
+function markPaid(from, to, f) {
+  confirmSheet("Mark as paid?", `${esc(nameOf(from))} paid ${esc(nameOf(to))} <b>${aed(f)}</b>. This clears that debt for everyone.`, "Mark as paid", false, () => {
+    const id = newId();
+    Store.save(id, { type: "payment", amount: f / 100, amountF: f, description: "Payment", category: "payment", date: todayISO(), paidBy: from, participants: [to], split: { [to]: f }, splitMode: "custom", createdBy: S.me, createdAt: Store.ts(), updatedBy: S.me, updatedAt: Store.ts(), createdMs: Date.now() })
+      .catch(() => toast("Couldn't save the payment. Try again.", "bad"));
+    toast(`${shortOf(from)} → ${shortOf(to)} marked as paid`);
+  });
+}
+
+/* ============ Villa code ============ */
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const cleanCode = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^V21/, "");
+const prettyCode = c => c.match(/.{1,4}/g).join("-");
+function makeCode() { const a = new Uint32Array(20); crypto.getRandomValues(a); return Array.from(a, n => CODE_CHARS[n % CODE_CHARS.length]).join(""); }
+function shareCode() {
+  const url = location.origin + location.pathname;
+  const text = `Join Villa 21 💸\n\n1. Open this link in Safari: ${url}\n2. Tap Share → Add to Home Screen (turn on "Open as Web App")\n3. Open Villa 21 and paste this code:\n\n${prettyCode(S.code)}`;
+  if (navigator.share) navigator.share({ text }).catch(() => {});
+  else navigator.clipboard.writeText(text).then(() => toast("Invite copied"), () => toast(prettyCode(S.code)));
+}
+
+/* ============ Events ============ */
+const ACT = {
+  "add": () => openForm(null),
+  "detail": b => openDetail(b.dataset.id),
+  "mark-paid": b => markPaid(b.dataset.from, b.dataset.to, +b.dataset.f),
+  "go-month": () => { S.month = monthOf(todayISO()); S.expTab = "list"; go("expenses"); },
+  "month": b => { S.month = shiftMonth(S.month, +b.dataset.d); render(); },
+  "exp-tab": b => { S.expTab = b.dataset.v; render(); },
+  "set-user": b => { S.me = b.dataset.id; lsSet(LS.user, S.me); render(); toast(`This phone is now ${nameOf(S.me)}`); },
+  "pick-user": b => { S.me = b.dataset.id; lsSet(LS.user, S.me); S.phase = "app"; render(); },
+  "theme": b => { const v = b.dataset.v; lsSet(LS.theme, v === "system" ? null : v); if (v === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", v); render(); },
+  "share-code": () => shareCode(),
+  "demo": () => startDemo(),
+  "paste": async () => { try { const t = await navigator.clipboard.readText(); $("#codeInp").value = t.trim(); } catch (e) { toast("Tap the box and choose Paste instead."); } },
+  "create": () => confirmSheet("Create Villa 21?", "Only do this once, on the first phone. TM and Rafi then join with the code you send them.", "Create", false, async () => {
+    const code = makeCode();
+    try { await Store.create(code); S.code = code; lsSet(LS.code, code); await Store.listen(); S.phase = S.me ? "app" : "who"; render(); toast("Villa 21 created. Send the code from Settings."); }
+    catch (e) { toast(navigator.onLine ? "Couldn't create the villa. Check the Firebase setup." : "You need internet to create the villa.", "bad", 5000); }
+  })
+};
+document.addEventListener("click", e => {
+  const tab = e.target.closest(".tab"); if (tab) { go(tab.dataset.to); return; }
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const fn = ACT[b.dataset.act]; if (fn) { e.preventDefault(); fn(b); }
+});
+document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches("[data-act][role=button]")) ACT[e.target.dataset.act](e.target); });
+document.addEventListener("submit", async e => {
+  if (e.target.id !== "joinForm") return;
+  e.preventDefault();
+  const code = cleanCode($("#codeInp").value), err = $("#joinErr"), btn = e.target.querySelector("[type=submit]");
+  if (code.length !== 20) { err.textContent = "That doesn't look like a Villa 21 code. It has 20 letters and numbers."; return; }
+  btn.disabled = true; btn.textContent = "Checking…"; err.textContent = "";
+  try {
+    if (!(await Store.check(code))) { err.textContent = "No Villa 21 found with that code. Check it and try again."; btn.disabled = false; btn.textContent = "Join Villa 21"; return; }
+    S.code = code; lsSet(LS.code, code); await Store.listen(); S.phase = S.me ? "app" : "who"; render();
+  } catch (ex) {
+    err.textContent = navigator.onLine ? "Couldn't check the code. Make sure Villa 21 is set up in Firebase, then try again." : "You need internet to join the first time.";
+    btn.disabled = false; btn.textContent = "Join Villa 21";
+  }
+});
+
+/* ============ Start ============ */
+async function boot() {
+  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+  let cfg = null;
+  try { cfg = (await import("./config.js")).firebaseConfig; } catch (e) {}
+  if (!cfg || !cfg.apiKey || /PASTE/.test(cfg.apiKey + cfg.projectId)) { S.phase = "setup"; render(); return; }
+  try { await startFirebase(cfg); }
+  catch (e) { $("#main").innerHTML = `<div class="onb"><div class="onb-head"><span class="badge lg">21</span><p class="muted">Villa 21 couldn't load. Check your internet connection and open it again.</p></div></div>`; return; }
+  if (!S.code) { S.phase = "join"; render(); return; }
+  Store.listen().catch(() => {});
+  S.phase = S.me ? "app" : "who"; render();
+}
+boot();
+</script>
+</body>
+</html>
