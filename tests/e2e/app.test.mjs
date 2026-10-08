@@ -246,6 +246,43 @@ service cloud.firestore { match /databases/{database}/documents {
   } finally { await rules(await readFile(join(ROOT, "firestore.rules"), "utf8")); }
 });
 
+test("a phone whose connection died catches up when it comes back on screen", async () => {
+  // Stand-in for an iPhone app back from the background with a dead connection.
+  await regin.evaluate(async () => {
+    const { getApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
+    const fs = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+    await fs.disableNetwork(fs.getFirestore(getApp()));
+  });
+  await tm.locator(".tab[data-to=home]").click();
+  await tm.locator("#fab").click();
+  await tm.locator("#f-amount").fill("45");
+  await tm.locator("#f-desc").fill("Gas cylinder");
+  await tm.locator(".sheet.open [data-x=save]").click();
+  await sheetGone(tm);
+  await tm.getByText("🔔 Notified").first().waitFor();
+  await regin.waitForTimeout(1500);
+  assert.equal(await regin.getByText("Gas cylinder").count(), 0, "the dead connection doesn't get it");
+  await regin.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));   // back on screen
+  await regin.getByText("Gas cylinder").first().waitFor({ timeout: 15000 });
+});
+
+test("Check sync shows what Firebase has for this phone", async () => {
+  await regin.locator(".tab[data-to=settings]").click();
+  await regin.getByText("Check sync").click();
+  const sheet = regin.locator(".sheet.open");
+  await sheet.getByText("Connection to Firebase").waitFor({ timeout: 20000 });
+  const rows = Object.fromEntries(await sheet.locator(".kv").evaluateAll(els => els.map(e => [e.children[0].textContent, e.children[1].textContent])));
+  assert.match(rows["App version"], /^\d+\.\d+$/);
+  assert.equal(rows["This phone"], "Regin Shafi");
+  assert.equal(rows["Villa code ends in"], "…" + code.slice(-4));
+  assert.equal(rows["Connection to Firebase"], "✓ Connected");
+  assert.equal(rows["Saved in Firebase as"], "✓ Regin Shafi");
+  assert.equal(rows["Entries in Firebase"], rows["Entries on this phone"]);
+  assert.equal(rows["Waiting to upload"], "✓ Nothing");
+  await sheet.locator("[data-sx=left]").click();
+  await regin.locator(".tab[data-to=home]").click();
+});
+
 test("who owes who is person to person; paying one person clears only that line", async () => {
   const r = await regin.evaluate(() => {
     const { pairwise, myMonth, balances } = window.Villa21Logic;
