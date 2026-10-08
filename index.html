@@ -169,6 +169,7 @@ button.cell:active{background:var(--fill)}
 .banner{display:flex;flex-direction:column;gap:12px}
 .banner .row2 .btn{min-height:46px}
 .who-hint{font-size:.8rem;font-weight:600;color:var(--muted)}
+.wait{color:#C26A00;font-weight:600}
 .cat-line,.bal-lines{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.88rem;color:var(--muted);margin-top:6px}
 .bal-lines{flex-direction:column;gap:4px;font-size:.95rem;color:var(--ink)}
 .cat-line b,.bal-lines b{color:var(--ink);font-weight:600}
@@ -221,7 +222,7 @@ button.cell:active{background:var(--fill)}
 
 <script type="module">
 /* ============ Fixed setup ============ */
-const VERSION = "1.4";
+const VERSION = "1.5";
 const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
 const USERS = [
   { id: "regin", name: "Regin Shafi", short: "Regin" },
@@ -363,13 +364,35 @@ async function startFirebase(cfg) {
       await ready;
       unsubs.forEach(u => u()); unsubs = [];
       unsubs.push(F.onSnapshot(col("expenses"), { includeMetadataChanges: true }, snap => {
-        S.expenses = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+        S.expenses = snap.docs.map(d => ({ ...d.data(), id: d.id, _pending: d.metadata.hasPendingWrites }));
         S.pending = snap.metadata.hasPendingWrites; S.loaded = true;
         render();
-      }, err => { S.loaded = true; if (err && err.code === "permission-denied") toast("This phone can't open the Villa 21 data. Check the code in Settings.", "bad", 6000); render(); }));
+      }, err => {
+        // A listener that hits an error stops for good: show it, and start listening again shortly.
+        S.loaded = true; S.listenError = (err && (err.code || err.message)) || "error";
+        if (err && err.code === "permission-denied") toast("This phone can't open the Villa 21 data. Check the code in Settings.", "bad", 6000);
+        render(); setTimeout(() => Store.listen().catch(() => {}), 5000);
+      }));
       unsubs.push(F.onSnapshot(F.doc(db, "villas", villaKey(S.code), "meta", "categories"), snap => {
         S.customCats = (snap.exists() && Array.isArray(snap.data().list)) ? snap.data().list : []; render();
       }, () => {}));
+    },
+    // iPhone apps can come back from the background with a dead connection that Firebase doesn't
+    // notice: new entries stop arriving and saves wait in a queue. Reconnecting fixes both.
+    async reconnect() {
+      try { await F.disableNetwork(db); await F.enableNetwork(db); } catch (e) {}
+      S.listenError = null; this.listen().catch(() => {});
+    },
+    // For Settings › Check sync: what Firebase itself says right now (not this phone's saved copy).
+    async diagnose() {
+      await ready;
+      const out = { uid: auth.currentUser.uid.slice(0, 6) };
+      await this.reconnect();
+      try { await withTimeout(F.getDocFromServer(F.doc(db, "villas", villaKey(S.code), "meta", "villa")), 10000); out.server = "ok"; } catch (e) { out.server = e.code || e.message; }
+      try { const s = await withTimeout(F.getDocFromServer(device()), 10000); out.device = s.exists() ? s.data().person : "missing"; } catch (e) { out.device = "error: " + (e.code || e.message); }
+      try { const s = await withTimeout(F.getDocsFromServer(col("expenses")), 15000); out.serverCount = s.size; } catch (e) { out.serverCount = "error: " + (e.code || e.message); }
+      try { await withTimeout(F.waitForPendingWrites(db), 10000); out.waiting = 0; } catch (e) { out.waiting = S.expenses.filter(x => x._pending).length || "stuck"; }
+      return out;
     },
     save(id, obj) { return withDevice(() => F.setDoc(F.doc(col("expenses"), id), obj)); },
     remove(id) { return withDevice(() => F.deleteDoc(F.doc(col("expenses"), id))); },
@@ -623,7 +646,7 @@ function expenseCell(e) {
   }
   const c = catOf(e.category), n = (e.participants || Object.keys(e.split || {})).length;
   const who = n === USERS.length ? "Split between all 3" : `Split: ${(e.participants || []).map(shortOf).join(" & ")}`;
-  return `<button class="cell emoji-cell" data-act="detail" data-id="${esc(e.id)}"><span class="emo">${esc(c.emoji)}</span><span class="cell-main"><span class="cell-title">${esc(e.description || c.label)}</span><span class="cell-sub">Paid by ${esc(nameOf(e.paidBy))} · ${esc(who)}</span></span><span class="cell-end"><b class="money">${aed(e.amountF)}</b></span></button>`;
+  return `<button class="cell emoji-cell" data-act="detail" data-id="${esc(e.id)}"><span class="emo">${esc(c.emoji)}</span><span class="cell-main"><span class="cell-title">${esc(e.description || c.label)}</span><span class="cell-sub">${e._pending ? `<span class="wait">⏳ Not synced yet</span> · ` : ""}Paid by ${esc(nameOf(e.paidBy))} · ${esc(who)}</span></span><span class="cell-end"><b class="money">${aed(e.amountF)}</b></span></button>`;
 }
 
 function viewHome() {
@@ -701,6 +724,7 @@ function viewSettings() {
     <section><div class="cap">Appearance</div><div class="seg"><button data-act="theme" data-v="light" aria-pressed="${theme === "light"}">Light</button><button data-act="theme" data-v="dark" aria-pressed="${theme === "dark"}">Dark</button><button data-act="theme" data-v="system" aria-pressed="${theme === "system"}">System</button></div></section>
     <section><div class="cap">Users</div><div class="group">${USERS.map(u => `<div class="kv"><span>${esc(u.name)}</span>${u.id === S.me ? `<span class="muted small">This phone</span>` : ""}</div>`).join("")}</div></section>
     ${S.demo ? "" : `<section><div class="cap">Invite</div><div class="group"><button class="cell" data-act="share-code"><span class="cell-main"><span class="cell-title">Send the Villa 21 code</span><span class="cell-sub">For TM and Rafi to join on their iPhones</span></span>${CHEV}</button></div></section>`}
+    ${S.demo ? "" : `<section><div class="cap">Help</div><div class="group"><button class="cell" data-act="check-sync"><span class="cell-main"><span class="cell-title">Check sync</span><span class="cell-sub">Reconnects, and shows what Firebase has for this phone</span></span>${CHEV}</button></div></section>`}
     <section><div class="cap">About</div><div class="group"><div class="kv"><span><img class="badge sm" src="logo.png" alt="">Villa 21</span><span class="muted">Version ${VERSION}</span></div></div></section>`;
 }
 
@@ -892,6 +916,35 @@ function markPaid(from, to, f) {
   });
 }
 
+/* ============ Check sync ============ */
+// Reconnects, then shows what Firebase itself has, so two phones can be compared side by side.
+async function checkSync() {
+  const sh = openSheet({ title: "Check sync", left: "Close" });
+  sh.body.innerHTML = `<div class="card empty"><span>Reconnecting and checking…</span></div>`;
+  let d;
+  try { d = await Store.diagnose(); } catch (e) { d = { server: (e && (e.code || e.message)) || "error" }; }
+  if (d.device === "missing" && S.me) { const p = await Store.register(S.me).catch(() => null); if (p) { d.device = p; d.fixed = true; if (p !== S.me) adopt(p); } }
+  const good = v => `<b class="pos">✓ ${v}</b>`, bad = v => `<b class="neg">✗ ${esc(v)}</b>`;
+  const newest = S.expenses.slice().sort((a, b) => (b.createdMs || 0) - (a.createdMs || 0))[0];
+  const row = (k, v) => `<div class="kv"><span>${k}</span><span style="text-align:right">${v}</span></div>`;
+  sh.body.innerHTML = `
+    <div class="group">
+      ${row("App version", esc(VERSION))}
+      ${row("This phone", esc(nameOf(S.me)))}
+      ${row("Villa code ends in", `<b>…${esc(String(S.code || "").slice(-4))}</b>`)}
+    </div>
+    <div class="group">
+      ${row("Connection to Firebase", d.server === "ok" ? good("Connected") : bad(d.server))}
+      ${row("Saved in Firebase as", USER[d.device] ? good(esc(nameOf(d.device)) + (d.fixed ? " (fixed now)" : "")) : bad(d.device || "unknown"))}
+      ${row("Entries in Firebase", typeof d.serverCount === "number" ? `<b>${d.serverCount}</b>` : bad(d.serverCount || "unknown"))}
+      ${row("Entries on this phone", `<b>${S.expenses.length}</b>`)}
+      ${row("Waiting to upload", d.waiting === 0 ? good("Nothing") : bad(d.waiting + (d.waiting === "stuck" ? "" : " entries")))}
+      ${row("Notifications", { on: good("On"), off: "Off", denied: bad("Blocked"), "ios-browser": "Open from Home Screen", unsupported: "Not available", none: "—" }[S.push] || "—")}
+    </div>
+    ${newest ? `<div class="group">${row("Newest entry", `<b>${esc(newest.description || catOf(newest.category).label)}</b> · ${esc(shortOf(newest.createdBy))} · ${aed(newest.amountF)}`)}</div>` : ""}
+    <p class="muted small" style="padding:0 4px">On every phone the villa code ending, the number of entries and the newest entry should be the same. If something is red, send a screenshot of this screen.</p>`;
+}
+
 /* ============ Villa code ============ */
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const cleanCode = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^V21/, "");
@@ -913,6 +966,7 @@ const ACT = {
   "month": b => { S.month = shiftMonth(S.month, +b.dataset.d); render(); },
   "exp-tab": b => { S.expTab = b.dataset.v; render(); },
   "pick-user": b => pickUser(b.dataset.id),
+  "check-sync": () => checkSync(),
   "push-on": () => enablePush(),
   "push-off": () => disablePush(),
   "push-test": () => testPush(),
@@ -960,9 +1014,15 @@ async function boot() {
   Store.listen().catch(() => {});
   await settleIdentity();
 }
-// Back on screen (iPhone apps can stay open in the background for days): check again.
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.phase === "app") { refreshPushState(); checkDevice(); } });
-window.addEventListener("online", () => { if (S.phase === "app") checkDevice(); });
+// Back on screen (iPhone apps can stay open in the background for days): reconnect and check again.
+let hiddenAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") { hiddenAt = Date.now(); return; }
+  if (S.phase !== "app") return;
+  refreshPushState(); checkDevice();
+  if (!S.demo && Store && Store.reconnect && Date.now() - hiddenAt > 2000) Store.reconnect();
+});
+window.addEventListener("online", () => { if (S.phase === "app") { checkDevice(); if (!S.demo && Store && Store.reconnect) Store.reconnect(); } });
 boot();
 </script>
 </body>

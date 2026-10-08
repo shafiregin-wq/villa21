@@ -37,6 +37,15 @@ a time, with exact Firebase/Supabase/GitHub clicks.
 - **Home:** the top card is *your* share of this month's expenses (resets each month) with a per-category
   line; the balance card shows your net plus one line per person. The Expenses tab keeps the villa total.
 
+## Sync on iPhone
+- iPhone Home Screen apps can resume from the background with a dead Firestore connection (new entries
+  stop arriving, saves sit in the queue, and the notify call — sent only after the save is confirmed —
+  never goes out). The app calls `Store.reconnect()` (disable/enable network + re-listen) whenever it
+  comes back on screen or online. Unsynced entries show "⏳ Not synced yet".
+- Settings › Help › **Check sync** reconnects and shows the server's view (connection, device record,
+  entry count, pending uploads, villa code ending) so two phones can be compared from screenshots.
+- `sw.js` fetches the page with `cache: "no-cache"`: GitHub Pages lets browsers keep it for 10 minutes.
+
 ## Notifications
 The phone calls `villa-notify` with the villa code (stored server-side only as SHA-256 of
 `"villa21:" + code`) and its person. Actions: `key`, `subscribe`, `unsubscribe`, `test`, `notify`

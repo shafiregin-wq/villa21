@@ -1,7 +1,7 @@
 // Villa 21 service worker: keeps the app itself available offline, and shows push notifications
 // (sent by the Supabase Edge Function "villa-notify") when someone else adds an expense or payment.
 // Expense data is synced by Firebase, which has its own offline storage; its network calls are never cached here.
-const VERSION = "villa21-v6";
+const VERSION = "villa21-v7";
 const SHELL = ["./", "./index.html", "./config.js", "./manifest.webmanifest", "./logo.png", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 const LIVE = /(firestore|identitytoolkit|securetoken|firebaseinstallations|firebaselogging)\.googleapis\.com$/;
 
@@ -26,12 +26,13 @@ self.addEventListener("fetch", event => {
   const url = new URL(req.url);
   if (LIVE.test(url.hostname)) return;
 
-  // The app page and its settings: newest from the network, saved copy when offline.
+  // The app page and its settings: newest from the network (no-cache: GitHub Pages lets browsers
+  // keep a copy for 10 minutes, which delayed updates), saved copy when offline.
   const fresh = req.mode === "navigate" || (url.origin === self.location.origin && /config\.js$/.test(url.pathname));
   if (fresh) {
     const key = req.mode === "navigate" ? "./index.html" : req;
     event.respondWith(
-      fetch(req).then(res => { if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(key, copy)); } return res; })
+      fetch(req, { cache: "no-cache" }).then(res => { if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(key, copy)); } return res; })
         .catch(() => caches.match(key))
     );
     return;
