@@ -220,6 +220,31 @@ service cloud.firestore { match /databases/{database}/documents {
   } finally { await rules(await readFile(join(ROOT, "firestore.rules"), "utf8")); }
 });
 
+test("a phone that chose under the old rules can still save after the new rules go live, without reopening", async () => {
+  const rules = content => fetch("http://127.0.0.1:8085/emulator/v1/projects/demo-villa21:securityRules", { method: "PUT", body: JSON.stringify({ rules: { files: [{ name: "firestore.rules", content }] } }) });
+  await rules(`rules_version = '2';
+service cloud.firestore { match /databases/{database}/documents {
+  match /villas/{villa}/meta/{d} { allow read, write: if request.auth != null; }
+  match /villas/{villa}/expenses/{e} { allow read, write: if request.auth != null; }
+} }`);
+  try {
+    const legacy = await phone("legacy2");
+    await joinWith(legacy, code);
+    await choose(legacy, "tm");
+    await rules(await readFile(join(ROOT, "firestore.rules"), "utf8"));
+    const before = calls.filter(c => c.kind === "expense").length;
+    await legacy.locator("#fab").click();
+    await legacy.locator("#f-amount").fill("30");
+    await legacy.locator("#f-desc").fill("Water cans");
+    await legacy.locator(".sheet.open [data-x=save]").click();
+    await sheetGone(legacy);
+    await regin.getByText("Water cans").first().waitFor({ timeout: 15000 });
+    await waitFor(() => calls.filter(c => c.kind === "expense").length === before + 1);
+    assert.equal(await legacy.locator(".toast.bad").count(), 0, "no error shown");
+    await legacy.close();
+  } finally { await rules(await readFile(join(ROOT, "firestore.rules"), "utf8")); }
+});
+
 let regin2;
 test("notifications: turn on, test, turn off (on Regin's second phone)", async () => {
   regin2 = await phone("regin2", { sw: true });
@@ -237,7 +262,7 @@ test("notifications: turn on, test, turn off (on Regin's second phone)", async (
 
   await regin2.locator(".tab[data-to=settings]").click();
   await regin2.getByText("Send a test").click();
-  await regin2.getByText("Test sent.").waitFor();
+  await regin2.getByText("Test sent to your phone").waitFor();
   assert.ok(calls.find(c => c.phone === "regin2" && c.action === "test" && c.person === "regin"));
   await regin2.getByText("Turn off on this phone").click();
   await regin2.getByText("Notifications are off for this phone.").waitFor();

@@ -8,7 +8,7 @@ import { handle, encryptPayload, vapidHeader, generateVapidKeys, b64uEncode, b64
 
 const CODE = "ABCD-EFGH-JKLM-NPQR-STUV", OTHER = "ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ";
 const env = { url: "https://project.supabase.test", key: "service-key" };
-let tables, inbox, realFetch, gone;
+let tables, inbox, realFetch, gone, refused;
 
 // A tiny stand-in for Supabase's REST API: just enough of PostgREST for this function.
 function fakeRest(url, init) {
@@ -32,7 +32,7 @@ function fakeRest(url, init) {
     else rows.push(row);
     return new Response("", { status: 201 });
   }
-  if (method === "DELETE") { tables[table] = rows.filter(r => !match(r)); return new Response("", { status: 204 }); }
+  if (method === "DELETE") { tables[table] = rows.filter(r => !match(r)); return new Response(null, { status: 204 }); }
 }
 
 function phone(name) {
@@ -43,7 +43,7 @@ function phone(name) {
 const phones = {};
 
 beforeEach(() => {
-  tables = { villa_push: [], push_config: [] }; inbox = []; gone = new Set();
+  tables = { villa_push: [], push_config: [] }; inbox = []; gone = new Set(); refused = {};
   for (const n of ["regin", "regin2", "tm", "rafi", "elsewhere"]) phones[n] = phone(n);
   realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init = {}) => {
@@ -51,6 +51,7 @@ beforeEach(() => {
     const p = Object.values(phones).find(x => x.endpoint === url);
     assert.ok(p, "only known phones get messages");
     if (gone.has(p.name)) return new Response("", { status: 410 });
+    if (refused[p.name]) return new Response(refused[p.name].body, { status: refused[p.name].status });
     assert.match(init.headers.Authorization, /^vapid t=.+, k=.+$/);
     const plain = ece.decrypt(Buffer.from(init.body), { version: "aes128gcm", privateKey: p.ecdh, authSecret: p.secret });
     inbox.push({ to: p.name, ...JSON.parse(plain.toString("utf8")) });
@@ -123,11 +124,27 @@ test("test notifications go only to the sender's own phones; expired phones are 
   for (const [n, p] of [["regin", "regin"], ["regin2", "regin"], ["tm", "tm"]]) await subscribe(n, p);
   gone.add("regin2");
   const r = await (await call({ action: "test", code: CODE, person: "regin" })).json();
-  assert.equal(r.sent, 1);
+  assert.deepEqual(r, { sent: 1, phones: 2, failures: ["Regin: 410"] }, "says what happened to each phone");
   assert.deepEqual(inbox.map(m => m.to), ["regin"]);
   assert.ok(!tables.villa_push.some(x => x.endpoint === phones.regin2.endpoint), "the expired phone was removed");
   await call({ action: "unsubscribe", code: CODE, person: "regin", endpoint: phones.regin.endpoint });
-  assert.equal((await (await call({ action: "test", code: CODE, person: "regin" })).json()).sent, 0);
+  assert.deepEqual(await (await call({ action: "test", code: CODE, person: "regin" })).json(), { sent: 0, phones: 0, failures: [] });
+});
+
+test("when Apple refuses a notification, the reason comes back (and the phone is kept)", async () => {
+  await subscribe("tm", "tm");
+  refused.tm = { status: 403, body: '{"reason":"BadJwtToken"}' };
+  const r = await (await call({ action: "test", code: CODE, person: "tm" })).json();
+  assert.deepEqual(r, { sent: 0, phones: 1, failures: ['TM: 403 {"reason":"BadJwtToken"}'] });
+  assert.equal(tables.villa_push.length, 1);
+});
+
+test("keys with \"=\" padding at the end are accepted", async () => {
+  const p = phones.rafi;
+  const res = await call({ action: "subscribe", code: CODE, person: "rafi", subscription: { endpoint: p.endpoint, p256dh: p.p256dh + "=", auth: p.auth + "==" } });
+  assert.equal(res.status, 200);
+  assert.equal(tables.villa_push[0].p256dh, p.p256dh, "stored without the padding");
+  assert.equal((await (await call({ action: "test", code: CODE, person: "rafi" })).json()).sent, 1);
 });
 
 test("a clear answer when the Supabase table hasn't been created", async () => {
