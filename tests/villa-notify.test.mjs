@@ -124,18 +124,18 @@ test("test notifications go only to the sender's own phones; expired phones are 
   for (const [n, p] of [["regin", "regin"], ["regin2", "regin"], ["tm", "tm"]]) await subscribe(n, p);
   gone.add("regin2");
   const r = await (await call({ action: "test", code: CODE, person: "regin" })).json();
-  assert.deepEqual(r, { sent: 1, phones: 2, failures: ["Regin: 410"] }, "says what happened to each phone");
+  assert.deepEqual(r, { sent: 1, phones: 2, failures: ["Regin: 410"], reached: ["Regin"], missing: [] }, "says what happened to each phone");
   assert.deepEqual(inbox.map(m => m.to), ["regin"]);
   assert.ok(!tables.villa_push.some(x => x.endpoint === phones.regin2.endpoint), "the expired phone was removed");
   await call({ action: "unsubscribe", code: CODE, person: "regin", endpoint: phones.regin.endpoint });
-  assert.deepEqual(await (await call({ action: "test", code: CODE, person: "regin" })).json(), { sent: 0, phones: 0, failures: [] });
+  assert.deepEqual(await (await call({ action: "test", code: CODE, person: "regin" })).json(), { sent: 0, phones: 0, failures: [], reached: [], missing: ["Regin"] });
 });
 
 test("when Apple refuses a notification, the reason comes back (and the phone is kept)", async () => {
   await subscribe("tm", "tm");
   refused.tm = { status: 403, body: '{"reason":"BadJwtToken"}' };
   const r = await (await call({ action: "test", code: CODE, person: "tm" })).json();
-  assert.deepEqual(r, { sent: 0, phones: 1, failures: ['TM: 403 {"reason":"BadJwtToken"}'] });
+  assert.deepEqual(r, { sent: 0, phones: 1, failures: ['TM: 403 {"reason":"BadJwtToken"}'], reached: [], missing: [] });
   assert.equal(tables.villa_push.length, 1);
 });
 
@@ -145,6 +145,22 @@ test("keys with \"=\" padding at the end are accepted", async () => {
   assert.equal(res.status, 200);
   assert.equal(tables.villa_push[0].p256dh, p.p256dh, "stored without the padding");
   assert.equal((await (await call({ action: "test", code: CODE, person: "rafi" })).json()).sent, 1);
+});
+
+test("a new expense says who was reached and who hasn't turned notifications on", async () => {
+  await subscribe("rafi", "rafi");
+  const r = await (await call({ action: "notify", code: CODE, person: "regin", kind: "expense", amountF: 100, shares: { tm: 50, rafi: 50 } })).json();
+  assert.deepEqual([r.sent, r.reached, r.missing], [1, ["Rafi"], ["TM"]]);
+});
+
+test("status: who has notifications on, and whether this phone is signed up", async () => {
+  await subscribe("regin", "regin"); await subscribe("regin2", "regin"); await subscribe("rafi", "rafi");
+  await subscribe("elsewhere", "tm", OTHER);
+  const s = await (await call({ action: "status", code: CODE, person: "rafi", endpoint: phones.rafi.endpoint })).json();
+  assert.deepEqual(s, { people: { regin: 2, tm: 0, rafi: 1 }, thisPhone: true }, "only this villa's phones count");
+  assert.equal((await (await call({ action: "status", code: CODE, person: "tm", endpoint: phones.tm.endpoint })).json()).thisPhone, false);
+  assert.equal((await (await call({ action: "status", code: CODE, person: "tm", endpoint: phones.rafi.endpoint })).json()).thisPhone, false, "signed up as someone else doesn't count");
+  assert.equal((await (await call({ action: "status", code: CODE, person: "tm" })).json()).thisPhone, false);
 });
 
 test("a clear answer when the Supabase table hasn't been created", async () => {

@@ -199,24 +199,29 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 // Sends to every phone of the given people in this villa; forgets phones whose subscription has expired.
 // Reports how many phones it found, how many got it, and why the others didn't.
-type Delivery = { sent: number; phones: number; failures: string[] };
+// reached: people at least one of whose phones got it; missing: people with no phone signed up.
+type Delivery = { sent: number; phones: number; failures: string[]; reached: string[]; missing: string[] };
 async function deliver(env: Env, d: Db, villa: string, people: Record<string, Note>, vapid: Vapid): Promise<Delivery> {
   const names = Object.keys(people);
-  if (!names.length) return { sent: 0, phones: 0, failures: [] };
+  if (!names.length) return { sent: 0, phones: 0, failures: [], reached: [], missing: [] };
   const subs: (Subscription & { person: string })[] = await d.get(`villa_push?villa=eq.${villa}&person=in.(${names.join(",")})&select=endpoint,p256dh,auth,person`);
   let sent = 0;
-  const failures: string[] = [];
+  const failures: string[] = [], reached = new Set<string>();
   await Promise.all(subs.map(async s => {
     try {
       const r = await sendPush(s, people[s.person], vapid, env.allowHttp);
-      if (r.status >= 200 && r.status < 300) sent++;
+      if (r.status >= 200 && r.status < 300) { sent++; reached.add(s.person); }
       else {
         failures.push(`${PEOPLE[s.person]}: ${r.status}${r.reason ? " " + r.reason : ""}`);
         if (r.status === 404 || r.status === 410) await d.del(`villa_push?endpoint=eq.${encodeURIComponent(s.endpoint)}`);
       }
     } catch (e) { failures.push(`${PEOPLE[s.person]}: ${String((e as Error).message || e).slice(0, 120)}`); }   // one bad phone shouldn't stop the others
   }));
-  return { sent, phones: subs.length, failures };
+  return {
+    sent, phones: subs.length, failures,
+    reached: names.filter(p => reached.has(p)).map(p => PEOPLE[p]),
+    missing: names.filter(p => !subs.some(s => s.person === p)).map(p => PEOPLE[p])
+  };
 }
 const unpad = (v: unknown) => String(v || "").replace(/=+$/, "");
 
@@ -248,6 +253,17 @@ export async function handle(req: Request, env: Env): Promise<Response> {
       const endpoint = String(body.endpoint || "");
       if (endpoint) await d.del(`villa_push?endpoint=eq.${encodeURIComponent(endpoint)}&villa=eq.${villa}`);
       return json({ ok: true });
+    }
+
+    // Who in this villa has notifications on (number of phones each), and whether the asking phone
+    // is one of them, so Settings can show what the server really has.
+    if (body.action === "status") {
+      const rows: { person: string; endpoint: string }[] = await d.get(`villa_push?villa=eq.${villa}&select=person,endpoint`);
+      const endpoint = String(body.endpoint || "");
+      return json({
+        people: Object.fromEntries(Object.keys(PEOPLE).map(p => [p, rows.filter(r => r.person === p).length])),
+        thisPhone: !!endpoint && rows.some(r => r.endpoint === endpoint && r.person === person)
+      });
     }
 
     const vapid = await vapidKeys(d, req.headers.get("origin"));
