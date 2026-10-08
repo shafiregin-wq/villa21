@@ -1,7 +1,7 @@
 // Villa 21 service worker: keeps the app itself available offline, and shows push notifications
 // (sent by the Supabase Edge Function "villa-notify") when someone else adds an expense or payment.
 // Expense data is synced by Firebase, which has its own offline storage; its network calls are never cached here.
-const VERSION = "villa21-v4";
+const VERSION = "villa21-v5";
 const SHELL = ["./", "./index.html", "./config.js", "./manifest.webmanifest", "./logo.png", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 const LIVE = /(firestore|identitytoolkit|securetoken|firebaseinstallations|firebaselogging)\.googleapis\.com$/;
 
