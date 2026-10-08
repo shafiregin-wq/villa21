@@ -218,7 +218,7 @@ button.cell:active{background:var(--fill)}
 
 <script type="module">
 /* ============ Fixed setup ============ */
-const VERSION = "1.1";
+const VERSION = "1.2";
 const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
 const USERS = [
   { id: "regin", name: "Regin Shafi", short: "Regin" },
@@ -355,9 +355,9 @@ async function startFirebase(cfg) {
         S.customCats = (snap.exists() && Array.isArray(snap.data().list)) ? snap.data().list : []; render();
       }, () => {}));
     },
-    save(id, obj) { return F.setDoc(F.doc(col("expenses"), id), obj); },
-    remove(id) { return F.deleteDoc(F.doc(col("expenses"), id)); },
-    saveCats(list) { return F.setDoc(F.doc(db, "villas", villaKey(S.code), "meta", "categories"), { list }); }
+    save(id, obj) { return withDevice(() => F.setDoc(F.doc(col("expenses"), id), obj)); },
+    remove(id) { return withDevice(() => F.deleteDoc(F.doc(col("expenses"), id))); },
+    saveCats(list) { return withDevice(() => F.setDoc(F.doc(db, "villas", villaKey(S.code), "meta", "categories"), { list })); }
   };
 }
 function startDemo() {
@@ -386,12 +386,30 @@ function adopt(person) {
   S.phase = "app"; render(); refreshPushState();
 }
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error("timeout"), { code: "unavailable" })), ms))]);
+// Makes sure Firebase knows this phone's person (it may have been chosen while the older rules
+// were still published, which didn't save it). Never switches person, except to follow Firebase.
+async function checkDevice() {
+  if (S.demo || !S.me || !Store || !Store.whoAmI) return;
+  const p = await Store.whoAmI().catch(() => undefined);
+  if (p && p !== S.me) adopt(p);
+  else if (p === null) { const q = await Store.register(S.me).catch(() => null); if (q && q !== S.me) adopt(q); }
+}
+// A save refused by the rules: if it's because this phone isn't registered yet, register it and
+// try once more. Any other refusal (someone else's entry) is passed on.
+async function withDevice(write) {
+  try { return await write(); }
+  catch (e) {
+    if (!e || e.code !== "permission-denied" || !S.me) throw e;
+    const p = await Store.register(S.me).catch(() => null);
+    if (p !== S.me) { if (p) adopt(p); throw e; }
+    return write();
+  }
+}
 async function settleIdentity() {
   const locked = lockedPerson();
   if (locked) {
     adopt(locked);
-    // Check in the background that Firebase agrees (and set it up again if it was lost).
-    Store.whoAmI().then(p => { if (p && p !== S.me) adopt(p); else if (!p) Store.register(S.me).then(q => { if (q !== S.me) adopt(q); }).catch(() => {}); }).catch(() => {});
+    checkDevice();   // in the background
     return;
   }
   S.phase = "loading"; render();
@@ -427,19 +445,21 @@ const pushSupported = () => "serviceWorker" in navigator && "PushManager" in win
 const PUSH_ERRORS = {
   not_set_up: "Notifications aren't set up yet. See “Notifications” in SETUP.md (the Supabase function “villa-notify”).",
   jwt_on: "In Supabase, turn off “Enforce JWT verification” for the villa-notify function, then try again.",
-  offline: "You're offline. Connect to the internet and try again."
+  offline: "You're offline. Connect to the internet and try again.",
+  unreachable: "Can't reach the notification service. In Supabase › Edge Functions, check there's a function named exactly “villa-notify” and that “Enforce JWT verification” is off."
 };
 async function pushCall(body) {
   if (!navigator.onLine) throw Object.assign(new Error("offline"), { code: "offline" });
   let res;
   try { res = await fetch(PUSH.url, { method: "POST", headers: { "Content-Type": "application/json", apikey: PUSH.key }, body: JSON.stringify(body) }); }
-  catch (e) { throw Object.assign(new Error("network"), { code: "offline" }); }
+  catch (e) { throw Object.assign(new Error("network"), { code: navigator.onLine ? "unreachable" : "offline" }); }   // a blocked request (e.g. JWT check on) looks the same
   const data = await res.json().catch(() => ({}));
   if (res.ok) return data;
-  const code = res.status === 404 || data.error === "not_set_up" ? "not_set_up" : res.status === 401 ? "jwt_on" : "failed";
-  throw Object.assign(new Error(data.error || data.message || `HTTP ${res.status}`), { code });
+  const code = res.status === 404 || data.error === "not_set_up" ? "not_set_up" : res.status === 401 || res.status === 403 ? "jwt_on" : "failed";
+  throw Object.assign(new Error(data.error || data.message || data.msg || `HTTP ${res.status}`), { code });
 }
-const pushErr = (e, fallback) => PUSH_ERRORS[e && e.code] || fallback;
+// The known problems in plain words; anything else keeps its technical detail for a screenshot.
+const pushErr = (e, fallback) => PUSH_ERRORS[e && e.code] || `${fallback}${e && e.message ? ` (${String(e.message).slice(0, 140)})` : ""}`;
 function b64uToBytes(s) { const t = s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4); return Uint8Array.from(atob(t), c => c.charCodeAt(0)); }
 async function swRegistration() { try { return (await navigator.serviceWorker.getRegistration()) || null; } catch (e) { return null; } }
 async function pushKey() {
@@ -447,7 +467,8 @@ async function pushKey() {
   if (!k) { k = (await pushCall({ action: "key" })).publicKey; lsSet(LS.pushKey, k); }
   return k;
 }
-function subInfo(sub) { const j = sub.toJSON(); return { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, userAgent: navigator.userAgent.slice(0, 300) }; }
+const unpad = s => String(s || "").replace(/=+$/, "");
+function subInfo(sub) { const j = sub.toJSON(); return { endpoint: j.endpoint, p256dh: unpad(j.keys.p256dh), auth: unpad(j.keys.auth), userAgent: navigator.userAgent.slice(0, 300) }; }
 
 // S.push: none | ios-browser | unsupported | denied | off | on
 let pushSynced = false;
@@ -485,7 +506,7 @@ async function enablePush() {
     pushSynced = true;
     toast("Notifications are on for this phone.");
   } catch (e) {
-    toast(pushErr(e, "Couldn't turn on notifications. Try again."), "bad", 6000);
+    toast(pushErr(e, "Couldn't turn on notifications."), "bad", 10000);
   }
   await refreshPushState();
 }
@@ -499,9 +520,12 @@ async function disablePush() {
 }
 async function testPush() {
   try {
-    const r = await pushCall({ action: "test", code: S.code, person: S.me });
-    toast(r && r.sent ? "Test sent. It should arrive in a few seconds." : "Nothing was sent. Turn notifications off and on again.", r && r.sent ? "" : "bad", 5000);
-  } catch (e) { toast(pushErr(e, "Couldn't send a test notification."), "bad", 6000); }
+    const r = await pushCall({ action: "test", code: S.code, person: S.me }) || {};
+    const failed = Array.isArray(r.failures) && r.failures.length ? ` Not delivered: ${r.failures.join("; ")}` : "";
+    if (r.sent) toast(`Test sent to ${r.sent === 1 ? "your phone" : r.sent + " of your phones"}. It should arrive in a few seconds.${failed}`, "", failed ? 12000 : 5000);
+    else if (failed) toast(`The test didn't go through.${failed}`, "bad", 15000);
+    else { pushSynced = false; toast("This phone isn't signed up for notifications yet. Tap “Turn off on this phone”, then turn them on again.", "bad", 8000); }
+  } catch (e) { toast(pushErr(e, "Couldn't send a test notification."), "bad", 10000); }
 }
 // After a new expense or payment is saved: tell the others. Never blocks or bothers the person saving.
 function notifyOthers(details) {
@@ -908,7 +932,9 @@ async function boot() {
   Store.listen().catch(() => {});
   await settleIdentity();
 }
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.phase === "app") refreshPushState(); });
+// Back on screen (iPhone apps can stay open in the background for days): check again.
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.phase === "app") { refreshPushState(); checkDevice(); } });
+window.addEventListener("online", () => { if (S.phase === "app") checkDevice(); });
 boot();
 </script>
 </body>

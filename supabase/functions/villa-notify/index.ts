@@ -90,8 +90,10 @@ export async function vapidHeader(endpoint: string, vapid: Vapid, now = Date.now
   return `vapid t=${head}.${claims}.${b64uEncode(sig)}, k=${vapid.publicKey}`;
 }
 
-export async function sendPush(sub: Subscription, message: unknown, vapid: Vapid, allowHttp = false): Promise<number> {
-  if (!/^https:\/\//.test(sub.endpoint) && !allowHttp) return 400;
+// Returns the push service's answer: 201 means delivered; otherwise its status and reason
+// (Apple answers e.g. 403 {"reason":"BadJwtToken"}).
+export async function sendPush(sub: Subscription, message: unknown, vapid: Vapid, allowHttp = false): Promise<{ status: number; reason: string }> {
+  if (!/^https:\/\//.test(sub.endpoint) && !allowHttp) return { status: 400, reason: "not https" };
   const res = await fetch(sub.endpoint, {
     method: "POST",
     headers: {
@@ -103,8 +105,9 @@ export async function sendPush(sub: Subscription, message: unknown, vapid: Vapid
     },
     body: await encryptPayload(JSON.stringify(message), sub.p256dh, sub.auth)
   });
-  await res.body?.cancel();
-  return res.status;
+  if (res.ok) { await res.body?.cancel(); return { status: res.status, reason: "" }; }
+  const reason = (await res.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 120);
+  return { status: res.status, reason };
 }
 
 /* ---------- Supabase access (with the project's service key) ---------- */
@@ -195,20 +198,27 @@ export function messages(from: string, body: Record<string, unknown>): Record<st
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
 // Sends to every phone of the given people in this villa; forgets phones whose subscription has expired.
-async function deliver(env: Env, d: Db, villa: string, people: Record<string, Note>, vapid: Vapid): Promise<number> {
+// Reports how many phones it found, how many got it, and why the others didn't.
+type Delivery = { sent: number; phones: number; failures: string[] };
+async function deliver(env: Env, d: Db, villa: string, people: Record<string, Note>, vapid: Vapid): Promise<Delivery> {
   const names = Object.keys(people);
-  if (!names.length) return 0;
+  if (!names.length) return { sent: 0, phones: 0, failures: [] };
   const subs: (Subscription & { person: string })[] = await d.get(`villa_push?villa=eq.${villa}&person=in.(${names.join(",")})&select=endpoint,p256dh,auth,person`);
   let sent = 0;
+  const failures: string[] = [];
   await Promise.all(subs.map(async s => {
     try {
-      const status = await sendPush(s, people[s.person], vapid, env.allowHttp);
-      if (status >= 200 && status < 300) sent++;
-      else if (status === 404 || status === 410) await d.del(`villa_push?endpoint=eq.${encodeURIComponent(s.endpoint)}`);
-    } catch (_) { /* one bad phone shouldn't stop the others */ }
+      const r = await sendPush(s, people[s.person], vapid, env.allowHttp);
+      if (r.status >= 200 && r.status < 300) sent++;
+      else {
+        failures.push(`${PEOPLE[s.person]}: ${r.status}${r.reason ? " " + r.reason : ""}`);
+        if (r.status === 404 || r.status === 410) await d.del(`villa_push?endpoint=eq.${encodeURIComponent(s.endpoint)}`);
+      }
+    } catch (e) { failures.push(`${PEOPLE[s.person]}: ${String((e as Error).message || e).slice(0, 120)}`); }   // one bad phone shouldn't stop the others
   }));
-  return sent;
+  return { sent, phones: subs.length, failures };
 }
+const unpad = (v: unknown) => String(v || "").replace(/=+$/, "");
 
 export async function handle(req: Request, env: Env): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
@@ -225,7 +235,8 @@ export async function handle(req: Request, env: Env): Promise<Response> {
 
     if (body.action === "subscribe") {
       const s = body.subscription || {};
-      const endpoint = String(s.endpoint || ""), p256dh = String(s.p256dh || ""), auth = String(s.auth || "");
+      // Keys are base64url; some phones add "=" padding at the end, which isn't needed.
+      const endpoint = String(s.endpoint || ""), p256dh = unpad(s.p256dh), auth = unpad(s.auth);
       if (!(/^https:\/\//.test(endpoint) || env.allowHttp) || endpoint.length > 1000 || !/^[\w-]{80,100}$/.test(p256dh) || !/^[\w-]{16,30}$/.test(auth)) return json({ error: "Bad subscription" }, 400);
       await d.post("villa_push?on_conflict=endpoint", { endpoint, villa, person, p256dh, auth, user_agent: text(s.userAgent, 300), created_at: new Date().toISOString() }, "resolution=merge-duplicates,return=minimal");
       const phones: { endpoint: string }[] = await d.get(`villa_push?villa=eq.${villa}&select=endpoint&order=created_at.desc&offset=${MAX_PHONES}`);
@@ -240,11 +251,8 @@ export async function handle(req: Request, env: Env): Promise<Response> {
     }
 
     const vapid = await vapidKeys(d, req.headers.get("origin"));
-    if (body.action === "test") {
-      const sent = await deliver(env, d, villa, { [person]: { title: "Villa 21", body: "Notifications are working on this phone.", tag: "v21-test" } }, vapid);
-      return json({ sent });
-    }
-    if (body.action === "notify") return json({ sent: await deliver(env, d, villa, messages(person, body), vapid) });
+    if (body.action === "test") return json(await deliver(env, d, villa, { [person]: { title: "Villa 21", body: "Notifications are working on this phone.", tag: "v21-test" } }, vapid));
+    if (body.action === "notify") return json(await deliver(env, d, villa, messages(person, body), vapid));
     return json({ error: "Unknown action" }, 400);
   } catch (err) {
     const message = String((err as Error).message || err);
