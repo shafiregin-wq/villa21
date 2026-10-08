@@ -1,0 +1,16 @@
+{
+  "name": "villa21",
+  "private": true,
+  "description": "Villa 21: shared flat expenses for three. The app needs no build step; these packages are only for the tests.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:rules": "firebase emulators:exec --only firestore,auth --project demo-villa21 \"node --test --test-concurrency=1 tests/rules/*.test.mjs tests/e2e/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "3.0.4",
+    "firebase": "10.12.2",
+    "firebase-tools": "13.35.1",
+    "http_ece": "1.2.1"
+  }
+}
