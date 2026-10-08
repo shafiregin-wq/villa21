@@ -153,7 +153,7 @@ button.cell:active{background:var(--fill)}
 .share input{width:96px;border:0;background:var(--fill);border-radius:9px;padding:8px 10px;text-align:right;font-size:17px;color:var(--ink);font-variant-numeric:tabular-nums}
 .toggle{position:relative;width:51px;height:31px;flex:none}
 .toggle input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
-.toggle i{position:absolute;inset:0;background:var(--fill);border-radius:999px;transition:background .2s}
+.toggle i{position:absolute;inset:0;background:var(--fill);border-radius:999px;transition:background .2s;pointer-events:none}
 .toggle i::after{content:"";position:absolute;width:27px;height:27px;top:2px;left:2px;background:#fff;border-radius:50%;box-shadow:0 2px 4px rgba(0,0,0,.25);transition:transform .2s}
 .toggle input:checked + i{background:var(--pos)}
 .toggle input:checked + i::after{transform:translateX(20px)}
@@ -222,7 +222,7 @@ button.cell:active{background:var(--fill)}
 
 <script type="module">
 /* ============ Fixed setup ============ */
-const VERSION = "1.5";
+const VERSION = "1.6";
 const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
 const USERS = [
   { id: "regin", name: "Regin Shafi", short: "Regin" },
@@ -316,7 +316,7 @@ window.Villa21Logic = { equalSplit, balances, pairwise, myMonth, funMsg };
 const S = {
   phase: "loading", me: lsGet(LS.user), code: lsGet(LS.code), demo: false,
   expenses: [], customCats: [], pending: false, online: navigator.onLine, loaded: false,
-  view: "home", month: monthOf(todayISO()), expTab: "list", push: "none"
+  view: "home", month: monthOf(todayISO()), expTab: "list", push: "none", pushServer: null
 };
 let Store = null;
 const shownFun = new Set();
@@ -522,12 +522,33 @@ async function refreshPushState() {
     else {
       const sub = await reg.pushManager.getSubscription().catch(() => null);
       state = sub && Notification.permission === "granted" ? "on" : "off";
-      // Keep the server's copy current (phones sometimes renew their subscription).
-      if (state === "on" && !pushSynced) { pushSynced = true; pushCall({ action: "subscribe", code: S.code, person: S.me, subscription: subInfo(sub) }).catch(() => {}); }
     }
   }
   if (S.push !== state) { S.push = state; render(); }
+  // Once per start: check with the server (and sign this phone up again if it lost it).
+  if (state !== "none" && !pushSynced) { pushSynced = true; loadPushStatus(); }
   return state;
+}
+// What the notification server really has: who has phones signed up, and whether this phone is one.
+// A phone can believe it's on (iPhone permission given, subscribed) while the server never got it,
+// e.g. if saving failed once; in that case it is signed up again here.
+async function loadPushStatus() {
+  if (S.demo || !PUSH || !S.me || !S.code) return;
+  S.pushServer = { ...(S.pushServer || {}), checking: true }; render();
+  let sub = null;
+  try { const reg = await swRegistration(); sub = reg && await reg.pushManager.getSubscription(); } catch (e) {}
+  const endpoint = sub ? sub.endpoint : "";
+  try {
+    let r = await pushCall({ action: "status", code: S.code, person: S.me, endpoint });
+    if (sub && !r.thisPhone && Notification.permission === "granted") {
+      await pushCall({ action: "subscribe", code: S.code, person: S.me, subscription: subInfo(sub) });
+      r = await pushCall({ action: "status", code: S.code, person: S.me, endpoint });
+    }
+    S.pushServer = { people: r.people || {}, thisPhone: !!r.thisPhone };
+  } catch (e) {
+    S.pushServer = { error: e && e.message === "Unknown action" ? "To see this, update the villa-notify function in Supabase (paste the new code and Deploy)." : pushErr(e, "Couldn't check with the notification service.") };
+  }
+  render();
 }
 async function enablePush() {
   // Ask straight from the tap: iPhones only show the question in response to a tap.
@@ -547,7 +568,7 @@ async function enablePush() {
   } catch (e) {
     toast(pushErr(e, "Couldn't turn on notifications."), "bad", 10000);
   }
-  await refreshPushState();
+  await refreshPushState(); await loadPushStatus();
 }
 async function disablePush() {
   try {
@@ -555,7 +576,7 @@ async function disablePush() {
     if (sub) { await pushCall({ action: "unsubscribe", code: S.code, person: S.me, endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe().catch(() => {}); }
     toast("Notifications are off for this phone.");
   } catch (e) { toast("Couldn't turn off notifications.", "bad"); }
-  pushSynced = false; await refreshPushState();
+  pushSynced = true; await refreshPushState(); await loadPushStatus();
 }
 async function testPush() {
   try {
@@ -563,17 +584,24 @@ async function testPush() {
     const failed = Array.isArray(r.failures) && r.failures.length ? ` Not delivered: ${r.failures.join("; ")}` : "";
     if (r.sent) toast(`Test sent to ${r.sent === 1 ? "your phone" : r.sent + " of your phones"}. It should arrive in a few seconds.${failed}`, "", failed ? 12000 : 5000);
     else if (failed) toast(`The test didn't go through.${failed}`, "bad", 15000);
-    else { pushSynced = false; toast("This phone isn't signed up for notifications yet. Tap “Turn off on this phone”, then turn them on again.", "bad", 8000); }
+    else { toast("This phone wasn't signed up. Signing it up again now; then try the test once more.", "bad", 8000); loadPushStatus(); }
   } catch (e) { toast(pushErr(e, "Couldn't send a test notification."), "bad", 10000); }
 }
 // After a new expense or payment is saved: tell the others, then say briefly how that went
 // (how many phones got it, or why not) so a problem is visible instead of silent.
 function notifyOthers(details) {
   if (S.demo || !PUSH || !S.me || !S.code) return;
+  const names = a => a.length > 1 ? `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}` : a[0];
   pushCall({ action: "notify", code: S.code, person: S.me, ...details }).then(r => {
     r = r || {};
     const failed = Array.isArray(r.failures) && r.failures.length ? r.failures.join("; ") : "";
     if (failed) toast(`🔔 Not delivered to everyone: ${failed}`, "bad", 12000);
+    else if (Array.isArray(r.reached) && Array.isArray(r.missing)) {
+      const parts = [];
+      if (r.reached.length) parts.push(`Notified ${names(r.reached)}`);
+      if (r.missing.length) parts.push(`${names(r.missing)} ${r.missing.length > 1 ? "haven't" : "hasn't"} turned on notifications yet`);
+      if (parts.length) toast("🔔 " + parts.join(" · "), "", 6000);
+    }
     else if (r.sent) toast(`🔔 Notified ${r.sent === 1 ? "1 phone" : r.sent + " phones"}`);
     else if (r.phones === 0) toast("🔔 Nobody else has notifications turned on yet, so no one was notified.", "", 6000);
   }).catch(e => toast(pushErr(e, "🔔 Couldn't send the notification."), "bad", 10000));
@@ -728,19 +756,35 @@ function viewSettings() {
     <section><div class="cap">About</div><div class="group"><div class="kv"><span><img class="badge sm" src="logo.png" alt="">Villa 21</span><span class="muted">Version ${VERSION}</span></div></div></section>`;
 }
 
+// Settings › Notifications: an on/off switch for this phone, confirmed with the server, and the
+// list of who gets notifications as the server sees it.
 function pushSettings() {
+  if (!S.push || S.push === "none") return "";
   const others = USERS.filter(u => u.id !== S.me).map(u => u.short).join(" or ");
+  const srv = S.pushServer || {};
   const cell = (title, sub, act) => act
     ? `<button class="cell" data-act="${act}"><span class="cell-main"><span class="cell-title">${title}</span>${sub ? `<span class="cell-sub">${sub}</span>` : ""}</span>${CHEV}</button>`
     : `<div class="cell"><span class="cell-main"><span class="cell-title">${title}</span>${sub ? `<span class="cell-sub" style="white-space:normal">${sub}</span>` : ""}</span></div>`;
-  const body = {
+  const blocked = {
     "ios-browser": cell("Add Villa 21 to your Home Screen", "On iPhone, notifications only work in the Home Screen app: Share › Add to Home Screen, then open it from there."),
     unsupported: cell("Not available here", "This browser can't show notifications."),
-    denied: cell("Notifications are blocked", "Allow them for Villa 21 in your phone's Settings › Notifications, then come back."),
-    off: cell("Turn on notifications", `Get a notification when ${esc(others)} add an expense or a payment`, "push-on"),
-    on: `${cell("Notifications are on", `You'll hear when ${esc(others)} add an expense or a payment`)}${cell("Send a test", "", "push-test")}${cell("Turn off on this phone", "", "push-off")}`
+    denied: cell("Notifications are blocked", "Allow them for Villa 21 in your phone's Settings › Notifications, then come back.")
   }[S.push];
-  return body ? `<section><div class="cap">Notifications</div><div class="group">${body}</div></section>` : "";
+  let body = blocked;
+  if (!blocked) {
+    const on = S.push === "on";
+    const sub = !on ? `Off. Turn on to hear when ${esc(others)} add an expense or a payment.`
+      : srv.error ? `<span class="neg">${esc(srv.error)}</span>`
+      : srv.thisPhone ? `<span class="pos">✓ Signed up.</span> You'll hear when ${esc(others)} add an expense or a payment.`
+      : srv.checking ? "Checking with the notification service…"
+      : `<span class="neg">Not signed up with the notification service.</span> Turn it off and on again.`;
+    body = `<label class="cell" style="cursor:pointer"><span class="cell-main"><span class="cell-title">Notifications on this phone</span><span class="cell-sub" style="white-space:normal">${sub}</span></span><span class="toggle"><input type="checkbox" id="push-toggle" ${on ? "checked" : ""} aria-label="Notifications on this phone"><i></i></span></label>${on ? cell("Send a test", "", "push-test") : ""}`;
+  }
+  const people = srv.people
+    ? `<section id="push-people"><div class="cap">Who gets notifications</div><div class="group">${USERS.map(u => { const n = srv.people[u.id] || 0; return `<div class="kv"><span>${esc(u.name)}${u.id === S.me ? ` <span class="muted small">(you)</span>` : ""}</span>${n ? `<b class="pos">✓ On${n > 1 ? ` · ${n} phones` : ""}</b>` : `<span class="muted">Off</span>`}</div>`; }).join("")}</div>
+      <p class="muted small" style="padding:8px 4px 0">Each person turns notifications on on their own phone (in the Home Screen app).</p></section>`
+    : "";
+  return `<section><div class="cap">Notifications</div><div class="group">${body}</div></section>${people}`;
 }
 
 const VIEWS = { home: viewHome, expenses: viewExpenses, settings: viewSettings };
@@ -760,7 +804,7 @@ function render() {
   main.innerHTML = S.loaded || S.demo ? VIEWS[S.view]() : `<div class="card empty"><span>Loading Villa 21…</span></div>`;
   SHEETS.slice().forEach(s => s.refresh && s.refresh());
 }
-function go(view) { S.view = view; render(); window.scrollTo(0, 0); }
+function go(view) { S.view = view; render(); window.scrollTo(0, 0); if (view === "settings") loadPushStatus(); }
 window.addEventListener("online", () => { S.online = true; render(); });
 window.addEventListener("offline", () => { S.online = false; render(); });
 
@@ -968,7 +1012,6 @@ const ACT = {
   "pick-user": b => pickUser(b.dataset.id),
   "check-sync": () => checkSync(),
   "push-on": () => enablePush(),
-  "push-off": () => disablePush(),
   "push-test": () => testPush(),
   "push-later": () => { lsSet(LS.pushBanner, "1"); render(); },
   "theme": b => { const v = b.dataset.v; lsSet(LS.theme, v === "system" ? null : v); if (v === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", v); render(); },
@@ -981,6 +1024,12 @@ const ACT = {
     catch (e) { toast(navigator.onLine ? "Couldn't create the villa. Check the Firebase setup." : "You need internet to create the villa.", "bad", 5000); }
   })
 };
+// The notifications switch in Settings (asking for permission straight from the tap, as iPhones require).
+document.addEventListener("change", e => {
+  if (e.target.id !== "push-toggle") return;
+  e.target.disabled = true;
+  if (e.target.checked) enablePush(); else disablePush();
+});
 document.addEventListener("click", e => {
   const tab = e.target.closest(".tab"); if (tab) { go(tab.dataset.to); return; }
   const b = e.target.closest("[data-act]"); if (!b) return;

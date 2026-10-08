@@ -49,8 +49,14 @@ a time, with exact Firebase/Supabase/GitHub clicks.
 ## Notifications
 The phone calls `villa-notify` with the villa code (stored server-side only as SHA-256 of
 `"villa21:" + code`) and its person. Actions: `key`, `subscribe`, `unsubscribe`, `test`, `notify`
-(`kind` "expense" with `shares`, or "payment" with `from`/`to`). Texts are built in the function, never
-taken from the phone. Sent for new expenses/payments only, to everyone except the sender.
+(`kind` "expense" with `shares`, or "payment" with `from`/`to`), `status` (phones per person, and
+whether the asking phone's endpoint is signed up). `test`/`notify` return `{ sent, phones, failures,
+reached, missing }`. Texts are built in the function, never taken from the phone. Sent for new
+expenses/payments only, to everyone except the sender.
+- A phone can be subscribed (and allowed in iPhone settings) while the server never got it. Settings
+  › Notifications is a switch confirmed with `status`, re-subscribes automatically when the server
+  lacks this phone, and lists who gets notifications. After a save, a toast says who was notified and
+  who hasn't turned notifications on.
 
 ## Tests (run before every PR)
 ```

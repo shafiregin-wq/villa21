@@ -22,6 +22,26 @@ export const pushConfig = { url: "${PUSH_URL}", key: "sb_publishable_test" };`;
 let server, base, browser;
 const calls = [];
 
+// Stand-in for the villa-notify function: remembers which phone is signed up as whom, and answers
+// like the real one (the real one is tested in tests/villa-notify.test.mjs).
+const fakeSubs = new Map();   // endpoint → person
+const SHORT = { regin: "Regin", tm: "TM", rafi: "Rafi" };
+function fakeNotify(body) {
+  const report = people => {
+    const phones = [...fakeSubs].filter(([, p]) => people.includes(p));
+    return { sent: phones.length, phones: phones.length, failures: [], reached: people.filter(p => phones.some(([, q]) => q === p)).map(p => SHORT[p]), missing: people.filter(p => !phones.some(([, q]) => q === p)).map(p => SHORT[p]) };
+  };
+  switch (body.action) {
+    case "key": return { publicKey: "BOrP2QvjQbqXqUtDAj-aoYiNb2a4_Jk0dDl4iY_rBAgV8L0VoSz4JnArDF0wMNHcIJgq5I1MyMaP_RTEBaq0TQM" };
+    case "subscribe": fakeSubs.set(body.subscription.endpoint, body.person); return { ok: true };
+    case "unsubscribe": fakeSubs.delete(body.endpoint); return { ok: true };
+    case "status": return { people: Object.fromEntries(Object.keys(SHORT).map(p => [p, [...fakeSubs.values()].filter(q => q === p).length])), thisPhone: fakeSubs.get(body.endpoint) === body.person };
+    case "test": return report([body.person]);
+    case "notify": return report(Object.keys(SHORT).filter(p => p !== body.person));
+    default: return { error: "Unknown action" };
+  }
+}
+
 before(async () => {
   await fetch("http://127.0.0.1:8085/emulator/v1/projects/demo-villa21/databases/(default)/documents", { method: "DELETE" });
   await fetch("http://127.0.0.1:9099/emulator/v1/projects/demo-villa21/accounts", { method: "DELETE" });
@@ -53,8 +73,7 @@ async function phone(name, { storage, sw = false } = {}) {
     if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "apikey, content-type" } });
     const body = JSON.parse(req.postData() || "{}");
     calls.push({ phone: name, apikey: req.headers().apikey, ...body });
-    const reply = body.action === "key" ? { publicKey: "BOrP2QvjQbqXqUtDAj-aoYiNb2a4_Jk0dDl4iY_rBAgV8L0VoSz4JnArDF0wMNHcIJgq5I1MyMaP_RTEBaq0TQM" } : body.action === "test" ? { sent: 1 } : body.action === "notify" ? { sent: 2 } : { ok: true };
-    route.fulfill({ status: 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(reply) });
+    route.fulfill({ status: 200, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(fakeNotify(body)) });
   });
   // Stand-in for the phone's push service, which isn't reachable from the test browser.
   await ctx.addInitScript(() => {
@@ -123,7 +142,7 @@ test("Regin adds an expense: the others are notified and can't change it", async
   assert.equal(note.code, code);
   assert.equal(note.apikey, "sb_publishable_test");
   assert.deepEqual([note.amountF, note.description, note.shares], [12000, "Chicken & rice", { regin: 4000, tm: 4000, rafi: 4000 }]);
-  await regin.getByText("🔔 Notified 2 phones").waitFor();
+  await regin.getByText("🔔 TM and Rafi haven't turned on notifications yet").waitFor();
 
   await tm.getByText("Chicken & rice").first().click();
   await tm.locator(".sheet.open").getByText("Only Regin can change or delete this expense.").waitFor();
@@ -259,7 +278,7 @@ test("a phone whose connection died catches up when it comes back on screen", as
   await tm.locator("#f-desc").fill("Gas cylinder");
   await tm.locator(".sheet.open [data-x=save]").click();
   await sheetGone(tm);
-  await tm.getByText("🔔 Notified").first().waitFor();
+  await tm.locator(".toast", { hasText: "🔔" }).first().waitFor();
   await regin.waitForTimeout(1500);
   assert.equal(await regin.getByText("Gas cylinder").count(), 0, "the dead connection doesn't get it");
   await regin.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));   // back on screen
@@ -331,14 +350,35 @@ test("notifications: turn on, test, turn off (on Regin's second phone)", async (
   assert.match(sub.subscription.endpoint, /^https:\/\/web\.push\.apple\.com\//);
   assert.equal(await regin2.locator(".banner").count(), 0, "the banner goes away");
 
+  const who = () => regin2.locator("#push-people .kv").evaluateAll(rows => rows.map(r => [r.children[0].textContent, r.children[1].textContent]));
   await regin2.locator(".tab[data-to=settings]").click();
+  await regin2.getByText("✓ Signed up.").waitFor();
+  assert.equal(await regin2.locator("#push-toggle").isChecked(), true);
+  assert.deepEqual(await who(), [["Regin Shafi (you)", "✓ On"], ["TM", "Off"], ["Rafi", "Off"]], "everyone can see who gets notifications");
   await regin2.getByText("Send a test").click();
   await regin2.getByText("Test sent to your phone").waitFor();
   assert.ok(calls.find(c => c.phone === "regin2" && c.action === "test" && c.person === "regin"));
-  await regin2.getByText("Turn off on this phone").click();
+
+  // The phone thinks it's on, but the server lost it (what happened to Rafi's phone): opening
+  // Settings notices and signs it up again.
+  const endpoint = sub.subscription.endpoint;
+  fakeSubs.delete(endpoint);
+  const before = calls.filter(c => c.phone === "regin2" && c.action === "subscribe").length;
+  await regin2.locator(".tab[data-to=home]").click();
+  await regin2.locator(".tab[data-to=settings]").click();
+  await waitFor(() => fakeSubs.get(endpoint) === "regin");
+  assert.equal(calls.filter(c => c.phone === "regin2" && c.action === "subscribe").length, before + 1);
+  await regin2.getByText("✓ Signed up.").waitFor();
+
+  // The switch turns it off, and back on.
+  await regin2.locator("#push-toggle").click();
   await regin2.getByText("Notifications are off for this phone.").waitFor();
   assert.ok(calls.find(c => c.phone === "regin2" && c.action === "unsubscribe"));
-  await regin2.getByText("Turn on notifications").waitFor();
+  await regin2.getByText("Off. Turn on to hear").waitFor();
+  await waitFor(async () => JSON.stringify(await who()) === JSON.stringify([["Regin Shafi (you)", "Off"], ["TM", "Off"], ["Rafi", "Off"]]));
+  await regin2.locator("#push-toggle").click();
+  await regin2.getByText("Notifications are on for this phone.").waitFor();
+  await regin2.getByText("✓ Signed up.").waitFor();
 });
 
 test("a push becomes a notification", async () => {
