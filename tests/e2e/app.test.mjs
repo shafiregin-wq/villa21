@@ -123,6 +123,7 @@ test("Regin adds an expense: the others are notified and can't change it", async
   assert.equal(note.code, code);
   assert.equal(note.apikey, "sb_publishable_test");
   assert.deepEqual([note.amountF, note.description, note.shares], [12000, "Chicken & rice", { regin: 4000, tm: 4000, rafi: 4000 }]);
+  await regin.getByText("🔔 Notified 2 phones").waitFor();
 
   await tm.getByText("Chicken & rice").first().click();
   await tm.locator(".sheet.open").getByText("Only Regin can change or delete this expense.").waitFor();

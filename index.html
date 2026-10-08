@@ -221,7 +221,7 @@ button.cell:active{background:var(--fill)}
 
 <script type="module">
 /* ============ Fixed setup ============ */
-const VERSION = "1.3";
+const VERSION = "1.4";
 const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
 const USERS = [
   { id: "regin", name: "Regin Shafi", short: "Regin" },
@@ -543,10 +543,17 @@ async function testPush() {
     else { pushSynced = false; toast("This phone isn't signed up for notifications yet. Tap “Turn off on this phone”, then turn them on again.", "bad", 8000); }
   } catch (e) { toast(pushErr(e, "Couldn't send a test notification."), "bad", 10000); }
 }
-// After a new expense or payment is saved: tell the others. Never blocks or bothers the person saving.
+// After a new expense or payment is saved: tell the others, then say briefly how that went
+// (how many phones got it, or why not) so a problem is visible instead of silent.
 function notifyOthers(details) {
   if (S.demo || !PUSH || !S.me || !S.code) return;
-  pushCall({ action: "notify", code: S.code, person: S.me, ...details }).catch(() => {});
+  pushCall({ action: "notify", code: S.code, person: S.me, ...details }).then(r => {
+    r = r || {};
+    const failed = Array.isArray(r.failures) && r.failures.length ? r.failures.join("; ") : "";
+    if (failed) toast(`🔔 Not delivered to everyone: ${failed}`, "bad", 12000);
+    else if (r.sent) toast(`🔔 Notified ${r.sent === 1 ? "1 phone" : r.sent + " phones"}`);
+    else if (r.phones === 0) toast("🔔 Nobody else has notifications turned on yet, so no one was notified.", "", 6000);
+  }).catch(e => toast(pushErr(e, "🔔 Couldn't send the notification."), "bad", 10000));
 }
 const pushBannerHidden = () => lsGet(LS.pushBanner) === "1";
 
