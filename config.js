@@ -11,3 +11,10 @@ export const firebaseConfig = {
   messagingSenderId: "285823440087",
   appId: "1:285823440087:web:0af824fd754106cbec4c92"
 };
+
+// Notifications: sent by the Supabase function "villa-notify" (see SETUP.md). The key is Supabase's
+// publishable key, which is meant to be public. Never put a secret or service_role key here.
+export const pushConfig = {
+  url: "https://lgyoqcblgtgvxitiunod.supabase.co/functions/v1/villa-notify",
+  key: "sb_publishable_JywSs9ZrbTKaX9Daf7Ah6w_vXtLXl4H"
+};

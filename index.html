@@ -165,6 +165,10 @@ button.cell:active{background:var(--fill)}
 .btn.solid-danger{background:var(--neg);color:#fff}
 .btn:disabled{opacity:.5}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fixed{background:var(--card);border-radius:12px;padding:14px 16px;min-height:50px;display:flex;align-items:center;justify-content:space-between;gap:12px;font-weight:600}
+.banner{display:flex;flex-direction:column;gap:12px}
+.banner .row2 .btn{min-height:46px}
+.who-hint{font-size:.8rem;font-weight:600;color:var(--muted)}
 
 /* Sheets */
 .scrim{position:fixed;inset:0;background:var(--scrim);z-index:50;opacity:0;transition:opacity .25s}
@@ -214,7 +218,7 @@ button.cell:active{background:var(--fill)}
 
 <script type="module">
 /* ============ Fixed setup ============ */
-const VERSION = "1.0";
+const VERSION = "1.1";
 const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
 const USERS = [
   { id: "regin", name: "Regin Shafi", short: "Regin" },
@@ -230,7 +234,7 @@ const BASE_CATS = [
 ];
 const UTILITIES = ["electricity", "water", "internet"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-const LS = { user: "v21.user", code: "v21.code", theme: "v21.theme", cat: "v21.lastCat" };
+const LS = { user: "v21.user", code: "v21.code", theme: "v21.theme", cat: "v21.lastCat", lock: "v21.lock", pushKey: "v21.pushKey", pushBanner: "v21.pushBanner" };
 
 /* ============ Small helpers ============ */
 const $ = (s, r = document) => r.querySelector(s);
@@ -295,7 +299,7 @@ window.Villa21Logic = { equalSplit, balances, settleUp, funMsg };
 const S = {
   phase: "loading", me: lsGet(LS.user), code: lsGet(LS.code), demo: false,
   expenses: [], customCats: [], pending: false, online: navigator.onLine, loaded: false,
-  view: "home", month: monthOf(todayISO()), expTab: "list"
+  view: "home", month: monthOf(todayISO()), expTab: "list", push: "none"
 };
 let Store = null;
 const shownFun = new Set();
@@ -307,15 +311,29 @@ const villaKey = code => "v21-" + code;
 async function startFirebase(cfg) {
   const [appM, authM, fsM] = await Promise.all([import(FB + "firebase-app.js"), import(FB + "firebase-auth.js"), import(FB + "firebase-firestore.js")]);
   const F = { ...appM, ...authM, ...fsM };
-  const app = F.initializeApp(cfg);
+  const { emulator, ...options } = cfg;   // emulator: only for the automated tests
+  const app = F.initializeApp(options);
   let db; try { db = F.initializeFirestore(app, { localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() }) }); } catch (e) { db = F.getFirestore(app); }
   const auth = F.getAuth(app);
+  if (emulator) { F.connectAuthEmulator(auth, emulator.auth, { disableWarnings: true }); F.connectFirestoreEmulator(db, emulator.host, emulator.port); }
   const ready = new Promise(res => { const off = F.onAuthStateChanged(auth, u => { if (u) { off(); res(u); } }); });
   if (!auth.currentUser) F.signInAnonymously(auth).catch(() => {});
   let unsubs = [];
   const col = name => F.collection(db, "villas", villaKey(S.code), name);
+  // Which person this phone belongs to, kept in Firebase so the rules can check every change.
+  const device = () => F.doc(db, "villas", villaKey(S.code), "devices", auth.currentUser.uid);
   Store = {
     ts: () => F.serverTimestamp(),
+    async whoAmI() {
+      await ready;
+      const snap = await F.getDoc(device());
+      return snap.exists() ? snap.data().person : null;
+    },
+    async register(person) {
+      await ready;
+      try { await F.setDoc(device(), { person, at: F.serverTimestamp() }); return person; }
+      catch (e) { const p = await this.whoAmI().catch(() => null); if (p) return p; throw e; }   // already set up as someone
+    },
     async check(code) {
       await ready;
       const snap = await F.getDocFromServer(F.doc(db, "villas", villaKey(code), "meta", "villa"));
@@ -343,7 +361,7 @@ async function startFirebase(cfg) {
   };
 }
 function startDemo() {
-  S.demo = true; S.code = "DEMO"; if (!S.me) S.me = "regin";
+  S.demo = true; S.code = "DEMO"; S.me = null;
   const m = S.month, all = USERS.map(u => u.id);
   const mk = (description, amt, category, paidBy, day, ids = all) => { const f = toF(amt); return { id: newId(), description, amountF: f, amount: f / 100, category, paidBy, date: `${m}-${pad(day)}`, participants: ids, split: equalSplit(f, ids), splitMode: "equal", type: "expense", createdBy: paidBy, createdMs: day }; };
   S.expenses = [mk("Monthly rent", 3000, "rent", "tm", 1), mk("DEWA bill", 350, "electricity", "rafi", 3), mk("Chicken & rice", 120, "food", "regin", 6), mk("Carrefour run", 210, "groceries", "regin", 5), mk("Cleaner", 100, "cleaning", "tm", 4, ["tm", "rafi"])];
@@ -352,10 +370,145 @@ function startDemo() {
     ts: () => Date.now(),
     save(id, obj) { const i = S.expenses.findIndex(x => x.id === id); const o = { ...obj, id }; if (i >= 0) S.expenses[i] = o; else S.expenses.push(o); render(); return Promise.resolve(); },
     remove(id) { S.expenses = S.expenses.filter(x => x.id !== id); render(); return Promise.resolve(); },
-    saveCats(list) { S.customCats = list; render(); return Promise.resolve(); }
+    saveCats(list) { S.customCats = list; render(); return Promise.resolve(); },
+    register: person => Promise.resolve(person)
   };
-  S.phase = S.me ? "app" : "who"; render();
+  S.phase = "who"; render();
 }
+
+/* ============ This phone's person ============ */
+// Each phone is one person for good: chosen once, saved in Firebase, and never switched.
+// Remembered on the phone as "CODE:person" so a different villa code asks again.
+const lockedPerson = () => { const [code, p] = String(lsGet(LS.lock) || "").split(":"); return code === S.code && USER[p] ? p : null; };
+function adopt(person) {
+  S.me = person; lsSet(LS.user, person);
+  if (!S.demo) lsSet(LS.lock, `${S.code}:${person}`);
+  S.phase = "app"; render(); refreshPushState();
+}
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error("timeout"), { code: "unavailable" })), ms))]);
+async function settleIdentity() {
+  const locked = lockedPerson();
+  if (locked) {
+    adopt(locked);
+    // Check in the background that Firebase agrees (and set it up again if it was lost).
+    Store.whoAmI().then(p => { if (p && p !== S.me) adopt(p); else if (!p) Store.register(S.me).then(q => { if (q !== S.me) adopt(q); }).catch(() => {}); }).catch(() => {});
+    return;
+  }
+  S.phase = "loading"; render();
+  const p = await withTimeout(Store.whoAmI(), 8000).catch(() => null);
+  if (p && USER[p]) { adopt(p); return; }
+  S.phase = "who"; render();
+}
+function pickUser(id) {
+  const u = USER[id]; if (!u) return;
+  confirmSheet(`Are you ${u.name}?`, `This phone will always be <b>${esc(u.name)}</b>. Only ${esc(u.short)} can change or delete ${esc(u.short)}'s expenses. This can't be switched later.`, `Yes, I'm ${u.short}`, false, async () => {
+    if (S.demo) { adopt(id); return; }
+    if (!navigator.onLine) { toast("You need internet for this step.", "bad", 4000); return; }
+    try {
+      const p = await withTimeout(Store.register(id), 20000);
+      adopt(p);
+      toast(p === id ? `Welcome, ${u.short}` : `This phone is already set up as ${nameOf(p)}.`, p === id ? "" : "bad", 5000);
+    } catch (e) {
+      // Older database rules don't know about phones yet: remember it here, and it's saved in
+      // Firebase automatically once the new rules are published (see settleIdentity).
+      if (e && e.code === "permission-denied") { adopt(id); toast(`Welcome, ${u.short}`); return; }
+      toast("Couldn't save. Check your internet and try again.", "bad", 6000);
+    }
+  });
+}
+
+/* ============ Notifications ============ */
+// Sent by the Supabase Edge Function "villa-notify" (see SETUP.md). The phone tells it about new
+// expenses and payments; it notifies the other two people's phones.
+let PUSH = null;   // { url, key } from config.js
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const PUSH_ERRORS = {
+  not_set_up: "Notifications aren't set up yet. See “Notifications” in SETUP.md (the Supabase function “villa-notify”).",
+  jwt_on: "In Supabase, turn off “Enforce JWT verification” for the villa-notify function, then try again.",
+  offline: "You're offline. Connect to the internet and try again."
+};
+async function pushCall(body) {
+  if (!navigator.onLine) throw Object.assign(new Error("offline"), { code: "offline" });
+  let res;
+  try { res = await fetch(PUSH.url, { method: "POST", headers: { "Content-Type": "application/json", apikey: PUSH.key }, body: JSON.stringify(body) }); }
+  catch (e) { throw Object.assign(new Error("network"), { code: "offline" }); }
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) return data;
+  const code = res.status === 404 || data.error === "not_set_up" ? "not_set_up" : res.status === 401 ? "jwt_on" : "failed";
+  throw Object.assign(new Error(data.error || data.message || `HTTP ${res.status}`), { code });
+}
+const pushErr = (e, fallback) => PUSH_ERRORS[e && e.code] || fallback;
+function b64uToBytes(s) { const t = s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4); return Uint8Array.from(atob(t), c => c.charCodeAt(0)); }
+async function swRegistration() { try { return (await navigator.serviceWorker.getRegistration()) || null; } catch (e) { return null; } }
+async function pushKey() {
+  let k = lsGet(LS.pushKey);
+  if (!k) { k = (await pushCall({ action: "key" })).publicKey; lsSet(LS.pushKey, k); }
+  return k;
+}
+function subInfo(sub) { const j = sub.toJSON(); return { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, userAgent: navigator.userAgent.slice(0, 300) }; }
+
+// S.push: none | ios-browser | unsupported | denied | off | on
+let pushSynced = false;
+async function refreshPushState() {
+  let state;
+  if (S.demo || !PUSH || !S.me || !S.code) state = "none";
+  else if (!pushSupported()) state = isIOS() && !isStandalone() ? "ios-browser" : "unsupported";
+  else if (Notification.permission === "denied") state = "denied";
+  else {
+    const reg = (await swRegistration()) || await withTimeout(navigator.serviceWorker.ready, 4000).catch(() => null);
+    if (!reg) state = isIOS() && !isStandalone() ? "ios-browser" : "unsupported";
+    else {
+      const sub = await reg.pushManager.getSubscription().catch(() => null);
+      state = sub && Notification.permission === "granted" ? "on" : "off";
+      // Keep the server's copy current (phones sometimes renew their subscription).
+      if (state === "on" && !pushSynced) { pushSynced = true; pushCall({ action: "subscribe", code: S.code, person: S.me, subscription: subInfo(sub) }).catch(() => {}); }
+    }
+  }
+  if (S.push !== state) { S.push = state; render(); }
+  return state;
+}
+async function enablePush() {
+  // Ask straight from the tap: iPhones only show the question in response to a tap.
+  let permission;
+  try { permission = await Notification.requestPermission(); } catch (e) { permission = Notification.permission; }
+  if (permission !== "granted") {
+    toast(permission === "denied" ? "Notifications are blocked. Allow them for Villa 21 in your phone's Settings › Notifications." : "Notifications weren't turned on.", "bad", 5000);
+    await refreshPushState(); return;
+  }
+  try {
+    const reg = await withTimeout(navigator.serviceWorker.ready, 10000);
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(await pushKey()) });
+    await pushCall({ action: "subscribe", code: S.code, person: S.me, subscription: subInfo(sub) });
+    pushSynced = true;
+    toast("Notifications are on for this phone.");
+  } catch (e) {
+    toast(pushErr(e, "Couldn't turn on notifications. Try again."), "bad", 6000);
+  }
+  await refreshPushState();
+}
+async function disablePush() {
+  try {
+    const reg = await swRegistration(), sub = reg && await reg.pushManager.getSubscription();
+    if (sub) { await pushCall({ action: "unsubscribe", code: S.code, person: S.me, endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe().catch(() => {}); }
+    toast("Notifications are off for this phone.");
+  } catch (e) { toast("Couldn't turn off notifications.", "bad"); }
+  pushSynced = false; await refreshPushState();
+}
+async function testPush() {
+  try {
+    const r = await pushCall({ action: "test", code: S.code, person: S.me });
+    toast(r && r.sent ? "Test sent. It should arrive in a few seconds." : "Nothing was sent. Turn notifications off and on again.", r && r.sent ? "" : "bad", 5000);
+  } catch (e) { toast(pushErr(e, "Couldn't send a test notification."), "bad", 6000); }
+}
+// After a new expense or payment is saved: tell the others. Never blocks or bothers the person saving.
+function notifyOthers(details) {
+  if (S.demo || !PUSH || !S.me || !S.code) return;
+  pushCall({ action: "notify", code: S.code, person: S.me, ...details }).catch(() => {});
+}
+const pushBannerHidden = () => lsGet(LS.pushBanner) === "1";
 
 /* ============ UI basics ============ */
 function toast(msg, tone, ms = 2600) { const el = document.createElement("div"); el.className = "toast" + (tone === "bad" ? " bad" : ""); el.textContent = msg; $("#toast").appendChild(el); setTimeout(() => el.remove(), ms); }
@@ -403,9 +556,10 @@ function viewOnbJoin(msg = "") {
   </div>`;
 }
 function viewOnbWho() {
+  const last = S.demo ? null : lsGet(LS.user);
   return `<div class="onb">
-    <div class="onb-head"><img class="badge lg" src="logo.png" alt="Villa 21 logo"><h1>Who are you?</h1><p class="muted">This phone will remember you.</p></div>
-    <div class="group">${USERS.map(u => `<button class="cell" data-act="pick-user" data-id="${u.id}"><span class="cell-main"><span class="cell-title">${esc(u.name)}</span></span>${CHEV}</button>`).join("")}</div>
+    <div class="onb-head"><img class="badge lg" src="logo.png" alt="Villa 21 logo"><h1>Who are you?</h1><p class="muted">Each phone belongs to one person and can't be switched later. Only you can add, change or delete your own expenses.</p></div>
+    <div class="group">${USERS.map(u => `<button class="cell" data-act="pick-user" data-id="${u.id}"><span class="cell-main"><span class="cell-title">${esc(u.name)}</span>${u.id === last ? `<span class="who-hint">Last used on this phone</span>` : ""}</span>${CHEV}</button>`).join("")}</div>
   </div>`;
 }
 function viewSetup() {
@@ -430,11 +584,15 @@ function viewHome() {
   const monthTotal = S.expenses.filter(e => isExpense(e) && monthOf(e.date) === month).reduce((s, e) => s + (e.amountF || 0), 0);
   const net = balances(S.expenses), mine = net[S.me] || 0, plan = settleUp(net);
   const recent = S.expenses.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdMs || 0) - (a.createdMs || 0)).slice(0, 5);
+  const others = USERS.filter(u => u.id !== S.me).map(u => u.short).join(" or ");
+  const banner = pushBannerHidden() ? "" : S.push === "off"
+    ? `<section class="card banner"><b>🔔 Get notified when ${esc(others)} add an expense</b><div class="row2"><button class="btn" data-act="push-later">Not now</button><button class="btn primary" data-act="push-on">Turn on</button></div></section>`
+    : S.push === "ios-browser" ? `<section class="card banner"><b>🔔 Want notifications?</b><span class="muted small">On iPhone they only work in the Home Screen app: tap Share › Add to Home Screen, then open Villa 21 from there.</span><div class="row2"><span></span><button class="btn" data-act="push-later">OK</button></div></section>` : "";
   const balHtml = mine < 0
     ? `${funTag("me", -mine)}<span class="muted small">Your balance</span><span class="amt neg">You owe ${aed(-mine)}</span>`
     : mine > 0 ? `<span class="muted small">Your balance</span><span class="amt pos">You should receive ${aed(mine)}</span>`
     : `<span class="muted small">Your balance</span><span class="amt">You're all square ✓</span>`;
-  return `
+  return `${banner}
     <section class="card month-card" data-act="go-month" role="button" tabindex="0">
       <span class="muted small">${monthLabel(month)} · Total expenses</span>
       <span class="total">${aed(monthTotal)}</span>
@@ -442,7 +600,7 @@ function viewHome() {
     <section class="card bal">${balHtml}</section>
     <section>
       <div class="sec-head"><h2>Who owes who?</h2></div>
-      <div class="group">${plan.length ? plan.map(p => `<div class="owe">${funTag(p.from + ">" + p.to, p.amountF)}<div class="owe-row"><span class="owe-names">${esc(nameOf(p.from))}<span>→</span>${esc(nameOf(p.to))}</span><span class="owe-amt">${aed(p.amountF)}</span><button class="paid-btn" data-act="mark-paid" data-from="${p.from}" data-to="${p.to}" data-f="${p.amountF}">Paid</button></div></div>`).join("") : `<div class="square">✓ Everyone is square. Nobody owes anything.</div>`}</div>
+      <div class="group">${plan.length ? plan.map(p => `<div class="owe">${funTag(p.from + ">" + p.to, p.amountF)}<div class="owe-row"><span class="owe-names">${esc(nameOf(p.from))}<span>→</span>${esc(nameOf(p.to))}</span><span class="owe-amt">${aed(p.amountF)}</span>${p.from === S.me || p.to === S.me ? `<button class="paid-btn" data-act="mark-paid" data-from="${p.from}" data-to="${p.to}" data-f="${p.amountF}">Paid</button>` : ""}</div></div>`).join("") : `<div class="square">✓ Everyone is square. Nobody owes anything.</div>`}</div>
     </section>
     <section>
       <div class="sec-head"><h2>Recent expenses</h2>${S.expenses.length > 5 ? `<button class="link" data-act="go-month">See all</button>` : ""}</div>
@@ -485,18 +643,35 @@ function viewSettings() {
   const theme = lsGet(LS.theme) || "system";
   return `
     <h1 style="padding:6px 4px 0">Settings</h1>
-    <section><div class="cap">Current user</div><div class="group">${USERS.map(u => `<button class="cell" data-act="set-user" data-id="${u.id}"><span class="cell-main"><span class="cell-title">${esc(u.name)}</span></span>${u.id === S.me ? `<span class="pos">${CHECK}</span>` : ""}</button>`).join("")}</div></section>
+    <section><div class="cap">This phone</div><div class="group"><div class="kv"><span>${esc(nameOf(S.me))}</span><span class="pos">${CHECK}</span></div></div>
+      <p class="muted small" style="padding:8px 4px 0">Each phone belongs to one person. You can add, change and delete only your own expenses; everyone sees everything.</p></section>
+    ${pushSettings()}
     <section><div class="cap">Appearance</div><div class="seg"><button data-act="theme" data-v="light" aria-pressed="${theme === "light"}">Light</button><button data-act="theme" data-v="dark" aria-pressed="${theme === "dark"}">Dark</button><button data-act="theme" data-v="system" aria-pressed="${theme === "system"}">System</button></div></section>
     <section><div class="cap">Users</div><div class="group">${USERS.map(u => `<div class="kv"><span>${esc(u.name)}</span>${u.id === S.me ? `<span class="muted small">This phone</span>` : ""}</div>`).join("")}</div></section>
     ${S.demo ? "" : `<section><div class="cap">Invite</div><div class="group"><button class="cell" data-act="share-code"><span class="cell-main"><span class="cell-title">Send the Villa 21 code</span><span class="cell-sub">For TM and Rafi to join on their iPhones</span></span>${CHEV}</button></div></section>`}
     <section><div class="cap">About</div><div class="group"><div class="kv"><span><img class="badge sm" src="logo.png" alt="">Villa 21</span><span class="muted">Version ${VERSION}</span></div></div></section>`;
 }
 
+function pushSettings() {
+  const others = USERS.filter(u => u.id !== S.me).map(u => u.short).join(" or ");
+  const cell = (title, sub, act) => act
+    ? `<button class="cell" data-act="${act}"><span class="cell-main"><span class="cell-title">${title}</span>${sub ? `<span class="cell-sub">${sub}</span>` : ""}</span>${CHEV}</button>`
+    : `<div class="cell"><span class="cell-main"><span class="cell-title">${title}</span>${sub ? `<span class="cell-sub" style="white-space:normal">${sub}</span>` : ""}</span></div>`;
+  const body = {
+    "ios-browser": cell("Add Villa 21 to your Home Screen", "On iPhone, notifications only work in the Home Screen app: Share › Add to Home Screen, then open it from there."),
+    unsupported: cell("Not available here", "This browser can't show notifications."),
+    denied: cell("Notifications are blocked", "Allow them for Villa 21 in your phone's Settings › Notifications, then come back."),
+    off: cell("Turn on notifications", `Get a notification when ${esc(others)} add an expense or a payment`, "push-on"),
+    on: `${cell("Notifications are on", `You'll hear when ${esc(others)} add an expense or a payment`)}${cell("Send a test", "", "push-test")}${cell("Turn off on this phone", "", "push-off")}`
+  }[S.push];
+  return body ? `<section><div class="cap">Notifications</div><div class="group">${body}</div></section>` : "";
+}
+
 const VIEWS = { home: viewHome, expenses: viewExpenses, settings: viewSettings };
 function render() {
   const main = $("#main"), app = S.phase === "app";
   $("#top").hidden = !app; $("#tabs").hidden = !app; $("#fab").hidden = !app || S.view === "settings";
-  if (S.phase === "loading") { main.innerHTML = ""; return; }
+  if (S.phase === "loading") { main.innerHTML = S.code ? `<div class="onb"><div class="onb-head"><img class="badge lg" src="logo.png" alt="Villa 21 logo"><p class="muted">Opening Villa 21…</p></div></div>` : ""; return; }
   if (S.phase === "setup") { main.innerHTML = viewSetup(); return; }
   if (S.phase === "join") { if (!$("#joinForm")) main.innerHTML = viewOnbJoin(); return; }
   if (S.phase === "who") { main.innerHTML = viewOnbWho(); return; }
@@ -529,7 +704,7 @@ function openForm(existing) {
         <div class="chips">${cats().map(c => `<button class="chip" data-cat="${esc(c.id)}" aria-pressed="${F.category === c.id}">${esc(c.emoji)} ${esc(c.label)}</button>`).join("")}<button class="chip add" data-x="new-cat">＋ Custom</button></div>
         ${addingCat ? `<div class="row2" style="grid-template-columns:72px 1fr auto;display:grid;gap:8px"><input class="inp" id="nc-emoji" placeholder="🙂" maxlength="4" aria-label="Emoji" style="text-align:center"><input class="inp" id="nc-name" placeholder="Category name, e.g. Gas" maxlength="24" aria-label="New category name"><button class="btn primary" data-x="save-cat" style="width:auto">Add</button></div>` : ""}
       </div>
-      <div class="field"><span class="lbl">Paid by</span><div class="seg">${USERS.map(u => `<button data-paid="${u.id}" aria-pressed="${F.paidBy === u.id}">${esc(u.short)}</button>`).join("")}</div></div>
+      <div class="field"><span class="lbl">Paid by</span><div class="fixed" id="f-paid"><span>${F.paidBy === S.me ? `You (${esc(nameOf(S.me))})` : esc(nameOf(F.paidBy))}</span></div></div>
       <div class="field"><span class="lbl">Split between <em>${F.custom ? "custom amounts" : "equally"}</em></span>
         <div class="group" id="f-split"></div>
         <div class="group"><label class="who-row" style="cursor:pointer"><span class="cell-main"><span class="cell-title">Custom split</span><span class="cell-sub">Set each person's amount yourself</span></span><span class="toggle"><input type="checkbox" id="f-custom" ${F.custom ? "checked" : ""}><i></i></span></label></div>
@@ -578,9 +753,8 @@ function openForm(existing) {
     }
   });
   sh.body.addEventListener("click", ev => {
-    const t = ev.target.closest("[data-cat],[data-paid],[data-part],[data-x]"); if (!t) return;
+    const t = ev.target.closest("[data-cat],[data-part],[data-x]"); if (!t) return;
     if (t.dataset.cat) { F.category = t.dataset.cat; sh.body.querySelectorAll("[data-cat]").forEach(b => b.setAttribute("aria-pressed", b === t)); return; }
-    if (t.dataset.paid) { F.paidBy = t.dataset.paid; sh.body.querySelectorAll("[data-paid]").forEach(b => b.setAttribute("aria-pressed", b === t)); return; }
     if (t.dataset.part) { const id = t.dataset.part; F.participants = F.participants.includes(id) ? F.participants.filter(x => x !== id) : [...F.participants, id]; if (F.custom && F.inputs[id] == null) F.inputs[id] = ""; drawSplit(); return; }
     const x = t.dataset.x;
     if (x === "new-cat") { addingCat = !addingCat; draw(); const n = $("#nc-name", sh.body); if (n) n.focus(); }
@@ -598,6 +772,7 @@ function openForm(existing) {
   function save() {
     const err = $("#f-err", sh.body), amount = num(F.amount);
     const fail = m => { err.textContent = m; err.scrollIntoView({ block: "center", behavior: "smooth" }); };
+    if (existing && existing.createdBy !== S.me) return fail(`Only ${shortOf(existing.createdBy)} can change this expense.`);
     if (amount == null) return fail("Enter the amount.");
     if (isNaN(amount) || amount <= 0) return fail("The amount must be more than 0.");
     if (amount > 1000000) return fail("That amount looks too high.");
@@ -610,12 +785,14 @@ function openForm(existing) {
     const c = catOf(F.category);
     const obj = {
       type: "expense", amount: r.totalF / 100, amountF: r.totalF, description: String(F.description || "").trim() || c.label,
-      category: c.id, date: F.date, paidBy: F.paidBy, participants: r.ids, split: r.split, splitMode: F.custom ? "custom" : "equal",
-      createdBy: existing ? existing.createdBy || S.me : S.me, createdAt: existing ? existing.createdAt || Store.ts() : Store.ts(),
+      category: c.id, date: F.date, paidBy: existing ? existing.paidBy : S.me, participants: r.ids, split: r.split, splitMode: F.custom ? "custom" : "equal",
+      createdBy: existing ? existing.createdBy : S.me, createdAt: existing ? existing.createdAt || Store.ts() : Store.ts(),
       updatedBy: S.me, updatedAt: Store.ts(), createdMs: existing ? existing.createdMs || Date.now() : Date.now()
     };
     lsSet(LS.cat, c.id);
-    Store.save(F.id, obj).catch(e => toast(e && e.code === "permission-denied" ? "This phone isn't allowed to save. Check the Villa 21 code." : "Couldn't save. Try again.", "bad", 5000));
+    Store.save(F.id, obj)
+      .then(() => { if (!existing) notifyOthers({ kind: "expense", id: F.id, amountF: obj.amountF, description: obj.description, emoji: c.emoji, shares: obj.split }); })
+      .catch(e => toast(e && e.code === "permission-denied" ? (existing ? "Only the person who added this expense can change it." : "This phone isn't allowed to add expenses. Close Villa 21 and open it again.") : "Couldn't save. Try again.", "bad", 5000));
     SHEETS.slice().forEach(s => s.close());
     toast(S.online || S.demo ? (existing ? "Expense updated" : "Expense added") : "Saved on this phone. It syncs when you're back online.");
   }
@@ -629,20 +806,21 @@ function openDetail(id) {
   function draw() {
     const e = S.expenses.find(x => x.id === id);
     if (!e) { sh.close(); return; }
-    const pay = !isExpense(e), c = catOf(e.category), to = Object.keys(e.split || {})[0];
+    const pay = !isExpense(e), c = catOf(e.category), to = Object.keys(e.split || {})[0], mine = e.createdBy === S.me;
     sh.body.innerHTML = `
       <div class="detail-top"><span class="emo">${pay ? "💸" : esc(c.emoji)}</span><span class="detail-amt">${aed(e.amountF)}</span><b>${pay ? `${esc(nameOf(e.paidBy))} paid ${esc(nameOf(to))}` : esc(e.description)}</b><span class="muted small">${pay ? "Payment" : esc(c.label)} · ${dayLabel(e.date)} ${e.date.slice(0, 4)}</span></div>
       ${pay ? "" : `<section><div class="cap">Paid by</div><div class="group"><div class="kv"><span>${esc(nameOf(e.paidBy))}</span><b>${aed(e.amountF)}</b></div></div></section>
       <section><div class="cap">Split ${e.splitMode === "custom" ? "(custom)" : "equally"}</div><div class="group">${USERS.map(u => `<div class="kv"><span>${esc(u.name)}</span>${(e.split || {})[u.id] ? `<b>${aed(e.split[u.id])}</b>` : `<span class="muted small">Not included</span>`}</div>`).join("")}</div></section>`}
       <p class="muted small" style="text-align:center">Added by ${esc(nameOf(e.createdBy))}${e.updatedBy && e.updatedBy !== e.createdBy ? ` · edited by ${esc(nameOf(e.updatedBy))}` : ""}</p>
-      <div class="row2">${pay ? "" : `<button class="btn" data-x="edit">Edit</button>`}<button class="btn danger" data-x="delete" ${pay ? 'style="grid-column:1/-1"' : ""}>Delete</button></div>`;
+      ${mine ? `<div class="row2">${pay ? "" : `<button class="btn" data-x="edit">Edit</button>`}<button class="btn danger" data-x="delete" ${pay ? 'style="grid-column:1/-1"' : ""}>Delete</button></div>`
+        : `<p class="card muted small" style="text-align:center">🔒 Only ${esc(shortOf(e.createdBy))} can change or delete this ${pay ? "payment" : "expense"}.</p>`}`;
   }
   sh.body.addEventListener("click", ev => {
     const b = ev.target.closest("[data-x]"); if (!b) return;
-    const e = S.expenses.find(x => x.id === id); if (!e) return;
+    const e = S.expenses.find(x => x.id === id); if (!e || e.createdBy !== S.me) return;
     if (b.dataset.x === "edit") openForm(e);
     if (b.dataset.x === "delete") confirmSheet(isExpense(e) ? "Delete this expense?" : "Delete this payment?", "Everyone's balance updates straight away.", "Delete", true, () => {
-      Store.remove(id).catch(() => toast("Couldn't delete. Try again.", "bad"));
+      Store.remove(id).catch(err => toast(err && err.code === "permission-denied" ? "Only the person who added it can delete it." : "Couldn't delete. Try again.", "bad", 5000));
       sh.close(); toast(isExpense(e) ? "Expense deleted" : "Payment deleted");
     });
   });
@@ -651,10 +829,13 @@ function openDetail(id) {
 
 /* ============ Mark as paid ============ */
 function markPaid(from, to, f) {
-  confirmSheet("Mark as paid?", `${esc(nameOf(from))} paid ${esc(nameOf(to))} <b>${aed(f)}</b>. This clears that debt for everyone.`, "Mark as paid", false, () => {
+  if (from !== S.me && to !== S.me) { toast(`Only ${shortOf(from)} or ${shortOf(to)} can mark this as paid.`, "bad"); return; }
+  const text = from === S.me ? `You paid ${esc(nameOf(to))} <b>${aed(f)}</b>.` : `${esc(nameOf(from))} paid you <b>${aed(f)}</b>.`;
+  confirmSheet("Mark as paid?", `${text} This clears that debt for everyone.`, "Mark as paid", false, () => {
     const id = newId();
     Store.save(id, { type: "payment", amount: f / 100, amountF: f, description: "Payment", category: "payment", date: todayISO(), paidBy: from, participants: [to], split: { [to]: f }, splitMode: "custom", createdBy: S.me, createdAt: Store.ts(), updatedBy: S.me, updatedAt: Store.ts(), createdMs: Date.now() })
-      .catch(() => toast("Couldn't save the payment. Try again.", "bad"));
+      .then(() => notifyOthers({ kind: "payment", id, from, to, amountF: f }))
+      .catch(e => toast(e && e.code === "permission-denied" ? "Only the two people in a payment can record it." : "Couldn't save the payment. Try again.", "bad", 5000));
     toast(`${shortOf(from)} → ${shortOf(to)} marked as paid`);
   });
 }
@@ -679,15 +860,18 @@ const ACT = {
   "go-month": () => { S.month = monthOf(todayISO()); S.expTab = "list"; go("expenses"); },
   "month": b => { S.month = shiftMonth(S.month, +b.dataset.d); render(); },
   "exp-tab": b => { S.expTab = b.dataset.v; render(); },
-  "set-user": b => { S.me = b.dataset.id; lsSet(LS.user, S.me); render(); toast(`This phone is now ${nameOf(S.me)}`); },
-  "pick-user": b => { S.me = b.dataset.id; lsSet(LS.user, S.me); S.phase = "app"; render(); },
+  "pick-user": b => pickUser(b.dataset.id),
+  "push-on": () => enablePush(),
+  "push-off": () => disablePush(),
+  "push-test": () => testPush(),
+  "push-later": () => { lsSet(LS.pushBanner, "1"); render(); },
   "theme": b => { const v = b.dataset.v; lsSet(LS.theme, v === "system" ? null : v); if (v === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", v); render(); },
   "share-code": () => shareCode(),
   "demo": () => startDemo(),
   "paste": async () => { try { const t = await navigator.clipboard.readText(); $("#codeInp").value = t.trim(); } catch (e) { toast("Tap the box and choose Paste instead."); } },
   "create": () => confirmSheet("Create Villa 21?", "Only do this once, on the first phone. TM and Rafi then join with the code you send them.", "Create", false, async () => {
     const code = makeCode();
-    try { await Store.create(code); S.code = code; lsSet(LS.code, code); await Store.listen(); S.phase = S.me ? "app" : "who"; render(); toast("Villa 21 created. Send the code from Settings."); }
+    try { await Store.create(code); S.code = code; lsSet(LS.code, code); await Store.listen(); await settleIdentity(); toast("Villa 21 created. Choose who you are, then send the code from Settings."); }
     catch (e) { toast(navigator.onLine ? "Couldn't create the villa. Check the Firebase setup." : "You need internet to create the villa.", "bad", 5000); }
   })
 };
@@ -705,7 +889,7 @@ document.addEventListener("submit", async e => {
   btn.disabled = true; btn.textContent = "Checking…"; err.textContent = "";
   try {
     if (!(await Store.check(code))) { err.textContent = "No Villa 21 found with that code. Check it and try again."; btn.disabled = false; btn.textContent = "Join Villa 21"; return; }
-    S.code = code; lsSet(LS.code, code); await Store.listen(); S.phase = S.me ? "app" : "who"; render();
+    S.code = code; lsSet(LS.code, code); await Store.listen(); await settleIdentity();
   } catch (ex) {
     err.textContent = navigator.onLine ? "Couldn't check the code. Make sure Villa 21 is set up in Firebase, then try again." : "You need internet to join the first time.";
     btn.disabled = false; btn.textContent = "Join Villa 21";
@@ -714,16 +898,17 @@ document.addEventListener("submit", async e => {
 
 /* ============ Start ============ */
 async function boot() {
-  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) navigator.serviceWorker.register("sw.js").catch(() => {});
   let cfg = null;
-  try { cfg = (await import("./config.js")).firebaseConfig; } catch (e) {}
+  try { const m = await import("./config.js"); cfg = m.firebaseConfig; PUSH = m.pushConfig && m.pushConfig.url && m.pushConfig.key ? m.pushConfig : null; } catch (e) {}
   if (!cfg || !cfg.apiKey || /PASTE/.test(cfg.apiKey + cfg.projectId)) { S.phase = "setup"; render(); return; }
   try { await startFirebase(cfg); }
   catch (e) { $("#main").innerHTML = `<div class="onb"><div class="onb-head"><img class="badge lg" src="logo.png" alt="Villa 21 logo"><p class="muted">Villa 21 couldn't load. Check your internet connection and open it again.</p></div></div>`; return; }
   if (!S.code) { S.phase = "join"; render(); return; }
   Store.listen().catch(() => {});
-  S.phase = S.me ? "app" : "who"; render();
+  await settleIdentity();
 }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.phase === "app") refreshPushState(); });
 boot();
 </script>
 </body>

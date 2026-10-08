@@ -1,0 +1,55 @@
+rules_version = '2';
+
+// Villa 21 security rules.
+// Paste this whole file into Firebase console › Firestore Database › Rules, then Publish.
+//
+// • Only phones that know the villa code can find the villa (its id comes from the code).
+// • Each phone belongs to one person (Regin, TM or Rafi), chosen once and never changed.
+// • Everyone can see every expense, but only the person who added it can change or delete it,
+//   and you can only add expenses paid by yourself.
+// • A payment can only be recorded by one of the two people in it.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /villas/{villa} {
+      function signedIn() { return request.auth != null; }
+      function device() { return /databases/$(database)/documents/villas/$(villa)/devices/$(request.auth.uid); }
+      function registered() { return signedIn() && exists(device()); }
+      function me() { return get(device()).data.person; }
+      function people() { return ["regin", "tm", "rafi"]; }
+
+      // An expense must be paid by the phone's person; a payment must involve them.
+      function ownsContent(d) {
+        return d.type == "payment"
+          ? (d.paidBy == me() || (d.participants is list && me() in d.participants))
+          : d.paidBy == me();
+      }
+
+      match /meta/{doc} {
+        allow read: if signedIn();
+        allow create: if signedIn() && doc == "villa";
+        allow create, update: if registered() && doc == "categories";
+      }
+
+      // Which person this phone (its Firebase sign-in) belongs to. Set once, never switched.
+      match /devices/{uid} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn() && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(["person", "at"])
+          && request.resource.data.person in people();
+        allow update, delete: if false;
+      }
+
+      match /expenses/{id} {
+        allow read: if signedIn();
+        allow create: if registered()
+          && request.resource.data.createdBy == me()
+          && ownsContent(request.resource.data);
+        allow update: if registered()
+          && resource.data.createdBy == me()
+          && request.resource.data.createdBy == me()
+          && (ownsContent(request.resource.data) || request.resource.data.paidBy == resource.data.paidBy);
+        allow delete: if registered() && resource.data.createdBy == me();
+      }
+    }
+  }
+}
