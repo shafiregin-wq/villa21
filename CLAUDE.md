@@ -31,6 +31,11 @@ a time, with exact Firebase/Supabase/GitHub clicks.
   only for debts you're part of, no person switcher in Settings.
 - If the old rules are still published, picking a person works locally and the device doc is saved
   once the new rules are live.
+- **Who owes who is person to person** (`pairwise`): each participant owes the payer their share, a
+  payment counts the other way, each pair is netted, and nothing is routed through a third person
+  (the owner found "simplified" debts confusing). Paying one person clears only that line.
+- **Home:** the top card is *your* share of this month's expenses (resets each month) with a per-category
+  line; the balance card shows your net plus one line per person. The Expenses tab keeps the villa total.
 
 ## Notifications
 The phone calls `villa-notify` with the villa code (stored server-side only as SHA-256 of

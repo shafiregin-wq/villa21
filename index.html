@@ -169,6 +169,9 @@ button.cell:active{background:var(--fill)}
 .banner{display:flex;flex-direction:column;gap:12px}
 .banner .row2 .btn{min-height:46px}
 .who-hint{font-size:.8rem;font-weight:600;color:var(--muted)}
+.cat-line,.bal-lines{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.88rem;color:var(--muted);margin-top:6px}
+.bal-lines{flex-direction:column;gap:4px;font-size:.95rem;color:var(--ink)}
+.cat-line b,.bal-lines b{color:var(--ink);font-weight:600}
 
 /* Sheets */
 .scrim{position:fixed;inset:0;background:var(--scrim);z-index:50;opacity:0;transition:opacity .25s}
@@ -218,7 +221,7 @@ button.cell:active{background:var(--fill)}
 
 <script type="module">
 /* ============ Fixed setup ============ */
-const VERSION = "1.2";
+const VERSION = "1.3";
 const FB = "https://www.gstatic.com/firebasejs/10.12.2/";
 const USERS = [
   { id: "regin", name: "Regin Shafi", short: "Regin" },
@@ -278,22 +281,35 @@ function balances(list) {
   });
   return net;
 }
-// Fewest transfers: biggest debtor pays biggest creditor until everyone is square.
-function settleUp(net) {
-  const cred = Object.entries(net).filter(([, v]) => v > 0).map(([id, v]) => ({ id, v })).sort((a, b) => b.v - a.v);
-  const debt = Object.entries(net).filter(([, v]) => v < 0).map(([id, v]) => ({ id, v: -v })).sort((a, b) => b.v - a.v);
-  const out = []; let i = 0, j = 0;
-  while (i < debt.length && j < cred.length) {
-    const amt = Math.min(debt[i].v, cred[j].v);
-    if (amt > 0) out.push({ from: debt[i].id, to: cred[j].id, amountF: amt });
-    debt[i].v -= amt; cred[j].v -= amt;
-    if (!debt[i].v) i++; if (!cred[j].v) j++;
-  }
-  return out;
+// Who owes whom, person to person: everyone in an expense owes the payer their share; a payment
+// (paidBy = who paid, split = who received) counts the other way. Each pair is then netted, and
+// nothing is passed on through a third person, so paying one person clears just that line.
+function pairwise(list) {
+  const owed = {};   // "a>b": what a owes b
+  list.forEach(e => Object.entries(e.split || {}).forEach(([id, f]) => {
+    if (id !== e.paidBy && USER[id] && USER[e.paidBy] && f > 0) owed[id + ">" + e.paidBy] = (owed[id + ">" + e.paidBy] || 0) + f;
+  }));
+  const out = [];
+  USERS.forEach((a, i) => USERS.slice(i + 1).forEach(b => {
+    const v = (owed[a.id + ">" + b.id] || 0) - (owed[b.id + ">" + a.id] || 0);
+    if (v > 0) out.push({ from: a.id, to: b.id, amountF: v });
+    if (v < 0) out.push({ from: b.id, to: a.id, amountF: -v });
+  }));
+  return out.sort((x, y) => y.amountF - x.amountF);
+}
+// One person's share of the expenses in a month, in total and by category.
+function myMonth(list, me, month) {
+  const byCat = {}; let total = 0;
+  list.forEach(e => {
+    const f = (e.split || {})[me] || 0;
+    if (!f || !isExpense(e) || monthOf(e.date) !== month) return;
+    total += f; byCat[e.category || "other"] = (byCat[e.category || "other"] || 0) + f;
+  });
+  return { total, byCat: Object.entries(byCat).sort((a, b) => b[1] - a[1]) };
 }
 // Fun line above a debt: over AED 50 and over AED 100.
 const funMsg = f => f > 10000 ? "💀 Aykk myre" : f > 5000 ? "😂 Aychirra paisaa" : "";
-window.Villa21Logic = { equalSplit, balances, settleUp, funMsg };
+window.Villa21Logic = { equalSplit, balances, pairwise, myMonth, funMsg };
 
 /* ============ State ============ */
 const S = {
@@ -605,21 +621,26 @@ function expenseCell(e) {
 
 function viewHome() {
   const month = monthOf(todayISO());
-  const monthTotal = S.expenses.filter(e => isExpense(e) && monthOf(e.date) === month).reduce((s, e) => s + (e.amountF || 0), 0);
-  const net = balances(S.expenses), mine = net[S.me] || 0, plan = settleUp(net);
+  const spent = myMonth(S.expenses, S.me, month);
+  const net = balances(S.expenses), mine = net[S.me] || 0, plan = pairwise(S.expenses);
+  const myLines = plan.filter(p => p.from === S.me || p.to === S.me)
+    .map(p => p.to === S.me ? `<span>${esc(shortOf(p.from))} owes you <b class="money">${aed(p.amountF)}</b></span>` : `<span>You owe ${esc(shortOf(p.to))} <b class="money">${aed(p.amountF)}</b></span>`).join("");
   const recent = S.expenses.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdMs || 0) - (a.createdMs || 0)).slice(0, 5);
   const others = USERS.filter(u => u.id !== S.me).map(u => u.short).join(" or ");
   const banner = pushBannerHidden() ? "" : S.push === "off"
     ? `<section class="card banner"><b>🔔 Get notified when ${esc(others)} add an expense</b><div class="row2"><button class="btn" data-act="push-later">Not now</button><button class="btn primary" data-act="push-on">Turn on</button></div></section>`
     : S.push === "ios-browser" ? `<section class="card banner"><b>🔔 Want notifications?</b><span class="muted small">On iPhone they only work in the Home Screen app: tap Share › Add to Home Screen, then open Villa 21 from there.</span><div class="row2"><span></span><button class="btn" data-act="push-later">OK</button></div></section>` : "";
-  const balHtml = mine < 0
+  const balHtml = (mine < 0
     ? `${funTag("me", -mine)}<span class="muted small">Your balance</span><span class="amt neg">You owe ${aed(-mine)}</span>`
     : mine > 0 ? `<span class="muted small">Your balance</span><span class="amt pos">You should receive ${aed(mine)}</span>`
-    : `<span class="muted small">Your balance</span><span class="amt">You're all square ✓</span>`;
+    : `<span class="muted small">Your balance</span><span class="amt">${myLines ? "Even overall" : "You're all square ✓"}</span>`)
+    + (myLines ? `<div class="bal-lines">${myLines}</div>` : "");
+  const catLine = spent.byCat.map(([id, f]) => { const c = catOf(id); return `<span>${esc(c.emoji)} ${esc(c.label)} <b class="money">${aed(f)}</b></span>`; }).join("");
   return `${banner}
     <section class="card month-card" data-act="go-month" role="button" tabindex="0">
-      <span class="muted small">${monthLabel(month)} · Total expenses</span>
-      <span class="total">${aed(monthTotal)}</span>
+      <span class="muted small">${monthLabel(month)} · Your expenses</span>
+      <span class="total">${aed(spent.total)}</span>
+      ${catLine ? `<div class="cat-line">${catLine}</div>` : `<span class="muted small">Your share of each expense adds up here.</span>`}
     </section>
     <section class="card bal">${balHtml}</section>
     <section>

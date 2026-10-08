@@ -245,6 +245,39 @@ service cloud.firestore { match /databases/{database}/documents {
   } finally { await rules(await readFile(join(ROOT, "firestore.rules"), "utf8")); }
 });
 
+test("who owes who is person to person; paying one person clears only that line", async () => {
+  const r = await regin.evaluate(() => {
+    const { pairwise, myMonth, balances } = window.Villa21Logic;
+    const e = (paidBy, split, extra = {}) => ({ type: "expense", paidBy, split, amountF: Object.values(split).reduce((a, b) => a + b, 0), category: "food", date: "2026-10-08", ...extra });
+    const list = [e("tm", { tm: 2550, rafi: 2550 }), e("regin", { regin: 3334, tm: 3333, rafi: 3333 })];   // the 51 and the 100 from the owner's screenshot
+    const paid = [...list, { type: "payment", paidBy: "tm", split: { regin: 3333 }, amountF: 3333, date: "2026-10-09" }];
+    return { before: pairwise(list), after: pairwise(paid), net: balances(list), regin: myMonth(paid, "regin", "2026-10"), tm: myMonth(paid, "tm", "2026-10"), next: myMonth(paid, "regin", "2026-11") };
+  });
+  assert.deepEqual(r.before, [{ from: "tm", to: "regin", amountF: 3333 }, { from: "rafi", to: "regin", amountF: 3333 }, { from: "rafi", to: "tm", amountF: 2550 }]);
+  assert.deepEqual(r.after, [{ from: "rafi", to: "regin", amountF: 3333 }, { from: "rafi", to: "tm", amountF: 2550 }], "TM paid Regin: only that line goes");
+  assert.deepEqual(r.net, { regin: 6666, tm: -783, rafi: -5883 }, "the overall balances are unchanged");
+  assert.deepEqual(r.regin, { total: 3334, byCat: [["food", 3334]] }, "your share only, payments don't count");
+  assert.deepEqual(r.tm, { total: 5883, byCat: [["food", 5883]] });
+  assert.deepEqual(r.next, { total: 0, byCat: [] }, "a new month starts at zero");
+});
+
+test("Home shows your own spending by category and what each person owes you", async () => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: "block" });
+  await ctx.route("**/config.js", route => route.fulfill({ status: 200, contentType: "text/javascript", body: `export const firebaseConfig = { apiKey: "PASTE" };` }));
+  const page = await ctx.newPage();
+  await page.goto(base);
+  await page.locator("[data-act=demo]").click();
+  await choose(page, "rafi");
+  const card = page.locator(".month-card");
+  assert.match(await card.textContent(), /Your expenses/);
+  assert.equal(await card.locator(".total").textContent(), "AED 1,276.66", "Rafi's shares: rent 1,000 + DEWA 116.66 + chicken 40 + Carrefour 70 + cleaner 50");
+  assert.deepEqual(await card.locator(".cat-line > span").allTextContents(), ["🏠 Rent AED 1,000", "💡 Electricity AED 116.66", "🛒 Groceries AED 70", "🧹 Cleaning AED 50", "🍔 Food AED 40"]);
+  assert.match(await page.locator(".bal .amt").textContent(), /You owe AED 926.66/);
+  assert.deepEqual(await page.locator(".bal-lines > span").allTextContents(), ["You owe TM AED 933.33", "Regin owes you AED 6.67"]);
+  assert.deepEqual(await owes(page), [{ who: "Rafi→TM", paid: true }, { who: "Regin Shafi→TM", paid: false }, { who: "Regin Shafi→Rafi", paid: true }]);
+  await ctx.close();
+});
+
 let regin2;
 test("notifications: turn on, test, turn off (on Regin's second phone)", async () => {
   regin2 = await phone("regin2", { sw: true });
